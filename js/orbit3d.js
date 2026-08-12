@@ -415,23 +415,22 @@ function colocarConos(vSol, vLuna) {
   const largo = eje.length();
   eje.normalize();
 
-  const radioLuna = 0.2725 * AUMENTO_SISTEMA;
-  const radioSuelo = Math.max(0.05, (p.umbraRadiusKm / R_EARTH_KM) * AUMENTO_SISTEMA);
+  // Un CILINDRO fino, no un cono. La umbra que llega al suelo mide unos 100 km
+  // de diámetro: comparada con los 12.700 km de la Tierra es un lápiz. Partir
+  // del radio de la Luna aumentada generaba un embudo enorme que daba una idea
+  // completamente equivocada de lo que proyecta la sombra — y lo que hace
+  // entendible el eclipse es justo lo contrario: que el haz es estrechísimo.
+  const radioHaz = Math.max(0.06, (p.umbraRadiusKm / R_EARTH_KM) * AUMENTO_SISTEMA);
 
   umbraCone.geometry.dispose();
-  umbraCone.geometry = new THREE.CylinderGeometry(radioSuelo, radioLuna, largo, 28, 1, true);
+  umbraCone.geometry = new THREE.CylinderGeometry(radioHaz, radioHaz * 1.35, largo, 20, 1, true);
   umbraCone.position.copy(vLuna.clone().add(eje.clone().multiplyScalar(largo / 2)));
   umbraCone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), eje);
   umbraCone.visible = true;
 
-  // El haz de penumbra se abre; solo se insinúa para dar contexto.
-  penumbraCone.geometry.dispose();
-  penumbraCone.geometry = new THREE.CylinderGeometry(
-    radioSuelo * 9, radioLuna * 1.6, largo, 32, 1, true,
-  );
-  penumbraCone.position.copy(umbraCone.position);
-  penumbraCone.quaternion.copy(umbraCone.quaternion);
-  penumbraCone.visible = true;
+  // Sin haz de penumbra: era el que ensanchaba el dibujo y confundía. La
+  // penumbra cubre medio planeta y no se puede insinuar sin mentir.
+  penumbraCone.visible = false;
 }
 
 function colocarMancha(fecha) {

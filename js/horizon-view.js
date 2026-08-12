@@ -19,13 +19,27 @@ const $ = (id) => document.getElementById(id);
 let calculando = false;
 let perfilRayo = null;
 
-// Alcance de la sección. Más allá de 40 km, con el Sol a estas alturas, haría
-// falta una montaña imposible para tapar nada.
-const ALCANCE_M = 40000;
+// Alcance del muestreo. Se guarda largo porque el cálculo debe considerar
+// sierras lejanas, pero el GRÁFICO se dibuja mucho más corto: para tapar el Sol
+// a 8° hace falta que algo se eleve 140 m por cada km de distancia, así que a
+// 1 km basta un cerro de 140 m, a 5 km hace falta una montaña de 700 m y a
+// 15 km una de 2.100 m. Casi todo lo que estorba de verdad está en los primeros
+// kilómetros; el resto se consulta con el selector.
+const MUESTREO_M = 40000;
+let alcanceVista = 4000;
 
 export function init() {
   $('btnHorizon').addEventListener('click', calcular);
   $('btnBetterSpots').addEventListener('click', buscarMejores);
+
+  $('rangePicker').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    alcanceVista = Number(b.dataset.m);
+    $('rangePicker').querySelectorAll('button')
+      .forEach((x) => x.classList.toggle('on', x === b));
+    if (perfilRayo) dibujarSeccion();
+  });
 
   document.addEventListener('eclipse:location', () => {
     if (!state.horizonProfile) {
@@ -56,7 +70,7 @@ async function calcular() {
     // La sección en la dirección del Sol es lo que se dibuja; el perfil de 360°
     // se sigue necesitando para el veredicto y para el ocaso tras el relieve.
     perfilRayo = await sunRayProfile(state.lat, state.lon, sun.az, sun.alt, {
-      maxDistM: ALCANCE_M, pasoM: 100,
+      maxDistM: MUESTREO_M, pasoM: 50,
     });
     bar.style.width = '55%';
 
@@ -198,7 +212,7 @@ function dibujarSeccion() {
 
   const ojo = perfilRayo.alturaOjo;
   const pts = perfilRayo.puntos;
-  const maxDist = ALCANCE_M;
+  const maxDist = alcanceVista;
 
   // El rayo del Sol sube en la gráfica porque la Tierra se curva bajo él: a
   // 40 km el suelo ya ha caído 107 m. Incluir ese término deja la comparación
@@ -208,7 +222,9 @@ function dibujarSeccion() {
   const alturaRayo = (d, altGrados) =>
     ojo + d * Math.tan(altGrados * Math.PI / 180) + (d * d) / (2 * EFECTIVO_R);
 
-  const cotas = pts.map((p) => p.elev);
+  // Solo entran en la escala vertical los puntos del tramo visible.
+  const visibles = pts.filter((p) => p.distM <= maxDist);
+  const cotas = visibles.map((p) => p.elev);
   const rayoMax = alturaRayo(maxDist, sun.alt);
   const alto = Math.max(...cotas, rayoMax, ojo + 50);
   const bajo = Math.min(...cotas, ojo) - 40;
@@ -230,16 +246,17 @@ function dibujarSeccion() {
     g.fillText(`${z} m`, padL - 6, y + 4);
   }
   g.textAlign = 'center';
-  for (let km = 0; km <= maxDist / 1000; km += 10) {
+  const pasoKm = maxDist <= 1500 ? 0.25 : maxDist <= 5000 ? 1 : maxDist <= 15000 ? 3 : 10;
+  for (let km = 0; km <= maxDist / 1000 + 1e-6; km += pasoKm) {
     const x = xOf(km * 1000);
     g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + plotH); g.stroke();
-    g.fillText(`${km} km`, x, H - 9);
+    g.fillText(km < 1 ? `${km * 1000} m` : `${km} km`, x, H - 9);
   }
 
   // Terreno
   g.beginPath();
   g.moveTo(xOf(0), yOf(ojo));
-  pts.forEach((p) => g.lineTo(xOf(p.distM), yOf(p.elev)));
+  visibles.forEach((p) => g.lineTo(xOf(p.distM), yOf(p.elev)));
   g.lineTo(xOf(maxDist), padT + plotH);
   g.lineTo(xOf(0), padT + plotH);
   g.closePath();
@@ -248,7 +265,7 @@ function dibujarSeccion() {
   grad.addColorStop(1, 'rgba(26,34,58,.95)');
   g.fillStyle = grad; g.fill();
   g.beginPath();
-  pts.forEach((p, i) => (i ? g.lineTo(xOf(p.distM), yOf(p.elev)) : g.moveTo(xOf(p.distM), yOf(p.elev))));
+  visibles.forEach((p, i) => (i ? g.lineTo(xOf(p.distM), yOf(p.elev)) : g.moveTo(xOf(p.distM), yOf(p.elev))));
   g.strokeStyle = '#9fb0d0'; g.lineWidth = 1.4; g.stroke();
 
   // Rayo al final del eclipse: el Sol sigue bajando mientras dura, y algo que
@@ -264,16 +281,27 @@ function dibujarSeccion() {
     }
   }
 
-  // Rayo en el máximo
+  // Rayo en el máximo, en dos tramos: naranja mientras hay visión libre y rojo
+  // a partir del punto en que el terreno se interpone. Mismo código de color
+  // que la línea del mapa, para que se lean igual.
+  const corte = perfilRayo.distanciaBloqueoM;
+  const dLibre = corte === null ? maxDist : Math.min(corte, maxDist);
+
   g.beginPath();
   g.moveTo(xOf(0), yOf(ojo));
-  g.lineTo(xOf(maxDist), yOf(alturaRayo(maxDist, sun.alt)));
-  g.strokeStyle = perfilRayo.distanciaBloqueoM !== null ? '#ff5c6e' : '#ffb238';
-  g.lineWidth = 2.5; g.stroke();
+  g.lineTo(xOf(dLibre), yOf(alturaRayo(dLibre, sun.alt)));
+  g.strokeStyle = '#ffb238'; g.lineWidth = 2.5; g.stroke();
+
+  if (corte !== null && corte < maxDist) {
+    g.beginPath();
+    g.moveTo(xOf(dLibre), yOf(alturaRayo(dLibre, sun.alt)));
+    g.lineTo(xOf(maxDist), yOf(alturaRayo(maxDist, sun.alt)));
+    g.strokeStyle = '#ff5c6e'; g.lineWidth = 2.5; g.stroke();
+  }
 
   // Punto de bloqueo
-  if (perfilRayo.distanciaBloqueoM !== null) {
-    const d = perfilRayo.distanciaBloqueoM;
+  if (corte !== null && corte <= maxDist) {
+    const d = corte;
     const x = xOf(d), y = yOf(alturaRayo(d, sun.alt));
     g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2);
     g.fillStyle = 'rgba(255,92,110,.25)'; g.fill();

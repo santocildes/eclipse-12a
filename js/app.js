@@ -286,6 +286,11 @@ function hms(ms) {
 
 async function showView(name) {
   state.view = name;
+  // La cuenta atrás flota fija sobre la pantalla. En las vistas con texto que
+  // se desplaza acababa montada encima del contenido, así que solo se muestra
+  // en las que ocupan la pantalla entera. La hora del máximo sigue estando
+  // siempre visible en la cabecera.
+  document.body.classList.toggle('vista-scroll', name === 'horizonte' || name === 'nubes');
   document.querySelectorAll('.view').forEach((v) => {
     v.classList.toggle('active', v.id === `view-${name}`);
   });

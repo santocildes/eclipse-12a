@@ -17,18 +17,25 @@
 <body>
 
 <!-- ══ Cabecera: resumen permanente del lugar elegido ══ -->
+<!-- Una sola barra con dos mitades del mismo alto: antes eran dos cajas
+     independientes que crecían por separado, se descuadraban y se solapaban. -->
 <header class="topbar" id="topbar">
-  <button class="place" id="placeBtn" aria-label="Cambiar ubicación">
-    <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg>
-    <span class="place-text">
-      <strong id="placeName">Elige un lugar</strong>
-      <small id="placeCoords">—</small>
-    </span>
-  </button>
-  <button class="verdict" id="verdict" hidden aria-label="Ver detalles del eclipse">
-    <span class="verdict-badge" id="verdictBadge">—</span>
-    <span class="verdict-sub" id="verdictSub"></span>
-  </button>
+  <div class="headbar">
+    <button class="hb-place" id="placeBtn" aria-label="Cambiar ubicación">
+      <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg>
+      <span class="hb-text">
+        <strong id="placeName">Elige un lugar</strong>
+        <small id="placeCoords">—</small>
+      </span>
+    </button>
+    <button class="hb-verdict" id="verdict" hidden aria-label="Ver detalles del eclipse">
+      <span class="hb-vtop">
+        <span class="verdict-badge" id="verdictBadge">—</span>
+        <span class="hb-chev" aria-hidden="true">›</span>
+      </span>
+      <span class="verdict-sub" id="verdictSub"></span>
+    </button>
+  </div>
 </header>
 
 <!-- ══ Cuenta atrás ══ -->
@@ -76,13 +83,20 @@
 
       <div id="horizonResult" hidden>
         <div class="verdict-card" id="horizonVerdict"></div>
+        <div class="range-picker" id="rangePicker" role="group" aria-label="Alcance del perfil">
+          <button data-m="1000">1 km</button>
+          <button data-m="4000" class="on">4 km</button>
+          <button data-m="12000">12 km</button>
+          <button data-m="40000">40 km</button>
+        </div>
         <figure class="chart-wrap">
           <canvas id="horizonChart" width="800" height="320"></canvas>
           <figcaption>
             Corte del terreno en la dirección del Sol: distancia en horizontal,
-            altura en vertical. La recta naranja es el rayo del Sol en el máximo;
-            la punteada, al final del eclipse. Donde el terreno cruza por encima,
-            te tapa. El rayo sube ligeramente porque la Tierra se curva bajo él.
+            altura en vertical. El rayo va en <b style="color:var(--sun)">naranja</b>
+            mientras hay visión libre y en <b style="color:var(--bad)">rojo</b> a
+            partir de donde el terreno lo tapa. La punteada es el rayo al final
+            del eclipse. Sube un poco porque la Tierra se curva bajo él.
           </figcaption>
         </figure>
         <div id="ocasoRelieve" class="notice" hidden></div>

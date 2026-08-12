@@ -23,7 +23,16 @@
 
   --safe-top:    env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --tabbar-h: calc(56px + var(--safe-bottom));
+  /* Solo la mitad del área segura: el indicador de inicio de iOS no necesita
+     los 34 px completos por debajo del contenido, y reservarlos enteros dejaba
+     la barra flotando muy alta. */
+  --safe-pad: min(var(--safe-bottom), 16px);
+  /* Alto de la barra de cabecera, incluido su margen superior. Todo lo que se
+     apoya debajo se posiciona a partir de aquí, en vez de con números sueltos
+     que había que reajustar a mano cada vez que cambiaba el contenido. */
+  --head-h: 78px;
+  --bajo-cabecera: calc(var(--safe-top) + var(--head-h));
+  --tabbar-h: calc(54px + var(--safe-pad));
   --radius: 14px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
@@ -74,44 +83,53 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .topbar {
   position: fixed; inset: 0 0 auto 0; z-index: 40;
   padding: calc(var(--safe-top) + 8px) 12px 8px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   background: linear-gradient(180deg, rgba(8,11,20,.96) 60%, rgba(8,11,20,0));
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
 
-.place {
-  display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
-  background: rgba(22,30,51,.82); border: 1px solid var(--line);
-  border-radius: 999px; padding: 7px 14px 7px 10px;
-  backdrop-filter: blur(12px); cursor: pointer; text-align: left;
+
+/* Barra única: las dos mitades comparten alto por `align-items: stretch`,
+   así el bloque del veredicto no puede crecer más que el del lugar ni
+   montarse encima como pasaba con dos cajas flotantes independientes. */
+.headbar {
+  display: flex; align-items: stretch; width: 100%; min-width: 0;
+  background: rgba(14,20,36,.9); border: 1px solid var(--line);
+  border-radius: 16px; overflow: hidden;
+  backdrop-filter: blur(14px);
 }
-.place:active { transform: scale(.98); }
-.place .ico { fill: var(--sun); width: 18px; height: 18px; }
-.place-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.place-text strong {
-  font-size: .9rem; font-weight: 600;
+.headbar > button {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: 0; cursor: pointer; padding: 7px 12px;
+  min-width: 0;
+}
+.headbar > button:active { background: rgba(255,255,255,.05); }
+
+.hb-place { flex: 1 1 auto; text-align: left; }
+.hb-place .ico { fill: var(--sun); width: 18px; height: 18px; }
+.hb-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.hb-text strong {
+  font-size: .92rem; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.place-text small { font-size: .72rem; color: var(--dim); }
+.hb-text small {
+  font-size: .71rem; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
-/* El resumen del veredicto se apoya sobre el mapa, así que necesita fondo
-   propio: sin él, el texto pequeño quedaba ilegible sobre el relieve claro. */
-.verdict {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
-  padding: 6px 10px; border-radius: 14px;
-  background: rgba(14,20,36,.82); border: 1px solid var(--line);
-  backdrop-filter: blur(12px);
-  cursor: pointer; text-align: right;
+.hb-verdict {
+  flex: 0 0 auto; flex-direction: column; align-items: flex-end;
+  gap: 2px; justify-content: center;
+  border-left: 1px solid var(--line) !important;
+  background: rgba(255,255,255,.03);
 }
-.verdict:active { transform: scale(.97); }
-/* Señal de que se puede tocar para ver el detalle completo. */
-.verdict::after {
-  content: 'ver detalles ›'; font-size: .62rem; color: var(--dim); letter-spacing: .02em;
-}
+.hb-vtop { display: flex; align-items: center; gap: 5px; }
+.hb-chev { color: var(--dim); font-size: 1rem; line-height: 1; }
+
 .verdict-badge {
-  font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  padding: 5px 11px; border-radius: 999px; white-space: nowrap;
+  font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap;
   background: var(--bg-3); border: 1px solid var(--line);
 }
 .verdict-badge.total { background: rgba(139,109,255,.18); border-color: var(--total); color: #c3b2ff; }
@@ -122,7 +140,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 /* ── Cuenta atrás ─────────────────────────────────────────── */
 .countdown {
   position: fixed; z-index: 39; left: 50%; transform: translateX(-50%);
-  top: calc(var(--safe-top) + 74px);
+  top: calc(var(--bajo-cabecera) + 8px);
   display: flex; align-items: baseline; gap: 7px;
   padding: 5px 14px; border-radius: 999px;
   background: rgba(14,20,36,.9); border: 1px solid var(--line);
@@ -132,6 +150,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .countdown strong {
   font-variant-numeric: tabular-nums; color: var(--sun); font-size: .95rem; font-weight: 700;
 }
+body.vista-scroll .countdown { display: none; }
 .countdown.live { border-color: var(--sun-hot); }
 .countdown.live strong { color: var(--sun-hot); }
 
@@ -142,7 +161,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 
 .pad {
   height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: calc(var(--safe-top) + 100px) 18px 32px;
+  padding: calc(var(--bajo-cabecera) + 14px) 18px 32px;
 }
 
 /* ── Mapa ─────────────────────────────────────────────────── */
@@ -150,15 +169,17 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .maplibregl-ctrl-attrib { font-size: 10px; }
 /* Se suben los controles de MapLibre por encima del asa del panel y de la
    leyenda, que ocupan la franja inferior. */
-.maplibregl-ctrl-bottom-right { bottom: 76px; }
-.maplibregl-ctrl-bottom-left { bottom: 96px; }
+.maplibregl-ctrl-bottom-right { bottom: 2px; }
+.maplibregl-ctrl-bottom-left { bottom: 2px; }
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl,
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl { margin: 0 8px 4px; }
 .maplibregl-ctrl-bottom-left .maplibregl-ctrl-scale {
   background: rgba(14,20,36,.85); border-color: var(--line); color: var(--muted);
 }
 
 .map-tools {
   position: absolute; right: 12px; z-index: 20;
-  top: calc(var(--safe-top) + 116px);
+  top: calc(var(--bajo-cabecera) + 50px);
   display: flex; flex-direction: column; gap: 8px;
 }
 .tool {
@@ -189,7 +210,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 
 /* Pista inicial sobre el mapa; desaparece al elegir un punto. */
 .map-hint {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 22px; z-index: 20;
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 44px; z-index: 20;
   padding: 8px 15px; border-radius: 999px; font-size: .8rem; color: var(--muted);
   background: rgba(14,20,36,.9); border: 1px solid var(--line); backdrop-filter: blur(12px);
   pointer-events: none;
@@ -322,6 +343,16 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .progress .bar { height: 100%; width: 0; background: var(--sun); transition: width .25s; }
 
 /* ── Gráficos ─────────────────────────────────────────────── */
+.range-picker { display: flex; gap: 6px; margin-bottom: 10px; }
+.range-picker button {
+  flex: 1; padding: 8px 4px; border-radius: 10px; cursor: pointer;
+  background: var(--bg-3); border: 1px solid var(--line); color: var(--muted);
+  font-size: .8rem; font-weight: 600;
+}
+.range-picker button.on {
+  background: rgba(255,178,56,.14); border-color: var(--sun); color: var(--sun);
+}
+
 .chart-wrap { margin: 0 0 16px; }
 .chart-wrap canvas {
   width: 100%; height: auto; display: block;
@@ -407,7 +438,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 
 .ar-start {
   position: absolute; inset: 0; overflow-y: auto;
-  padding: calc(var(--safe-top) + 100px) 18px 32px;
+  padding: calc(var(--bajo-cabecera) + 14px) 18px 32px;
 }
 .ar-start.hidden { display: none; }
 
@@ -432,7 +463,7 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .orbit-zoom .tool { width: 42px; height: 42px; font-size: 1.3rem; font-weight: 400; }
 .orbit-buttons .tool { flex: 1; width: auto; height: 38px; }
 .orbit-note {
-  position: absolute; left: 12px; right: 12px; top: calc(var(--safe-top) + 122px);
+  position: absolute; left: 12px; right: 12px; top: calc(var(--bajo-cabecera) + 52px);
   font-size: .74rem; color: var(--muted); line-height: 1.45;
   background: rgba(8,11,20,.72); border: 1px solid var(--line);
   padding: 7px 11px; border-radius: 10px; backdrop-filter: blur(8px);
@@ -450,13 +481,13 @@ h3 { font-size: 1.1rem; margin: 0 0 .75rem; }
 .tabbar {
   position: fixed; inset: auto 0 0 0; z-index: 50;
   display: grid; grid-template-columns: repeat(5, 1fr);
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: var(--safe-pad);
   background: rgba(8,11,20,.96); border-top: 1px solid var(--line);
   backdrop-filter: blur(18px);
 }
 .tab {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 7px 0 6px; background: none; border: 0; cursor: pointer;
+  padding: 6px 0 5px; background: none; border: 0; cursor: pointer;
   color: var(--dim); font-size: .66rem;
 }
 .tab .ico { width: 21px; height: 21px; }

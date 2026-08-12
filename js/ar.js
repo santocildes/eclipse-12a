@@ -484,6 +484,13 @@ function dibujarSolEn(g, x, y, st, pxPorGrado) {
   g.fillStyle = halo;
   g.beginPath(); g.arc(x, y, rSol * (total ? 3.4 : 2.1), 0, Math.PI * 2); g.fill();
 
+  // La Luna ENTERA, en gris tenue, antes de dibujar el Sol. Así se ve de qué
+  // lado viene y cómo va entrando: sin esto solo se apreciaba el mordisco, y no
+  // quedaba claro que hubiera un cuerpo acercándose.
+  g.beginPath(); g.arc(mx, my, rLuna, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(196,202,214,.16)'; g.fill();
+  g.strokeStyle = 'rgba(214,220,232,.42)'; g.lineWidth = 1.2; g.stroke();
+
   // Disco solar
   g.save();
   g.beginPath(); g.arc(x, y, rSol, 0, Math.PI * 2); g.clip();
@@ -493,6 +500,11 @@ function dibujarSolEn(g, x, y, st, pxPorGrado) {
   g.globalCompositeOperation = 'destination-out';
   g.beginPath(); g.arc(mx, my, rLuna, 0, Math.PI * 2); g.fill();
   g.restore();
+
+  // Borde de la Luna por delante del Sol: remata el contorno del mordisco.
+  g.beginPath(); g.arc(mx, my, rLuna, 0, Math.PI * 2);
+  g.strokeStyle = total ? 'rgba(180,190,210,.55)' : 'rgba(150,158,175,.5)';
+  g.lineWidth = 1.2; g.stroke();
 
   // Borde
   g.beginPath(); g.arc(x, y, rSol, 0, Math.PI * 2);

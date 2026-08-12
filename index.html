@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Eclipse 12A · ¿Se verá desde aquí?</title>
+<meta name="description" content="Planifica el eclipse total de Sol del 12 de agosto de 2026: relieve 3D, horizonte, nubes y realidad aumentada.">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ══ Cabecera: resumen permanente del lugar elegido ══ -->
+<header class="topbar" id="topbar">
+  <button class="place" id="placeBtn" aria-label="Cambiar ubicación">
+    <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg>
+    <span class="place-text">
+      <strong id="placeName">Elige un lugar</strong>
+      <small id="placeCoords">—</small>
+    </span>
+  </button>
+  <div class="verdict" id="verdict" hidden>
+    <span class="verdict-badge" id="verdictBadge">—</span>
+    <span class="verdict-sub" id="verdictSub"></span>
+  </div>
+</header>
+
+<!-- ══ Cuenta atrás ══ -->
+<div class="countdown" id="countdown" hidden>
+  <span id="countdownLabel">Faltan</span>
+  <strong id="countdownValue">—</strong>
+</div>
+
+<main id="views">
+
+  <!-- ─────────── Vista: MAPA 3D ─────────── -->
+  <section class="view active" id="view-mapa">
+    <div id="map"></div>
+
+    <div class="map-tools">
+      <button class="tool" id="btn3d" title="Alternar relieve 3D">3D</button>
+      <button class="tool" id="btnBasemap" title="Cambiar fondo">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 2 2 7l10 5 10-5-10-5zm0 20 10-5-2.5-1.25L12 19.5 4.5 15.75 2 17l10 5zm0-6 10-5-2.5-1.25L12 13.5 4.5 9.75 2 11l10 5z"/></svg>
+      </button>
+      <button class="tool" id="btnLocate" title="Mi ubicación">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
+      </button>
+      <button class="tool" id="btnSunLine" title="Dirección del Sol">☀</button>
+    </div>
+
+    <div class="legend" id="legend">
+      <div class="legend-row"><i class="sw sw-band"></i> Franja de totalidad</div>
+      <div class="legend-row"><i class="sw sw-center"></i> Línea central</div>
+      <div class="legend-row" id="legendSun" hidden><i class="sw sw-sun"></i> Dirección del Sol en el máximo</div>
+    </div>
+
+    <button class="sheet-handle" id="sheetHandle" aria-label="Ver detalles">
+      <span class="grip"></span>
+      <span id="handleSummary">Toca el mapa para elegir un punto</span>
+    </button>
+  </section>
+
+  <!-- ─────────── Vista: HORIZONTE ─────────── -->
+  <section class="view" id="view-horizonte">
+    <div class="pad">
+      <h2>¿Te tapa el terreno?</h2>
+      <p class="lead" id="horizonLead">
+        Con el Sol tan bajo, el relieve decide. Calculo el perfil del horizonte
+        real en los 360° alrededor de tu punto y lo comparo con la posición del
+        Sol durante el eclipse.
+      </p>
+
+      <button class="cta" id="btnHorizon">Calcular mi horizonte</button>
+      <div class="progress" id="horizonProgress" hidden><div class="bar"></div></div>
+
+      <div id="horizonResult" hidden>
+        <div class="verdict-card" id="horizonVerdict"></div>
+        <figure class="chart-wrap">
+          <canvas id="horizonChart" width="800" height="340"></canvas>
+          <figcaption>
+            Perfil del horizonte alrededor de tu posición. La curva es el terreno;
+            el punto marca dónde estará el Sol en el máximo del eclipse.
+          </figcaption>
+        </figure>
+        <div id="horizonStats" class="stats"></div>
+        <button class="cta ghost" id="btnBetterSpots">Buscar un punto mejor cerca</button>
+        <div id="betterSpots"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── Vista: NUBES ─────────── -->
+  <section class="view" id="view-nubes">
+    <div class="pad">
+      <h2>Previsión de nubes</h2>
+      <div id="cloudStatus" class="notice">Cargando previsión…</div>
+      <div id="cloudResult" hidden>
+        <div class="score-card" id="cloudScore"></div>
+        <div class="cloud-levels" id="cloudLevels"></div>
+        <figure class="chart-wrap">
+          <canvas id="cloudChart" width="800" height="240"></canvas>
+          <figcaption>Nubosidad hora a hora. La banda marca el eclipse.</figcaption>
+        </figure>
+        <button class="cta ghost" id="btnCloudMap">Ver mapa de nubes en la franja</button>
+        <p class="fineprint">
+          Fuente: Open-Meteo (modelo ICON/GFS). La previsión solo es fiable
+          dentro de los 16 días previos, y la nubosidad a escala local puede
+          cambiar mucho en pocas horas.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── Vista: REALIDAD AUMENTADA ─────────── -->
+  <section class="view" id="view-ar">
+    <div class="ar-stage" id="arStage">
+      <video id="arVideo" playsinline muted autoplay></video>
+      <canvas id="arCanvas"></canvas>
+      <div class="ar-hud" id="arHud">
+        <div class="ar-readout" id="arReadout"></div>
+        <div class="ar-guide" id="arGuide"></div>
+        <!-- Ajuste manual de brújula: los magnetómetros de los móviles se
+             desvían con facilidad y conviene poder corregirlo en el sitio. -->
+        <div class="ar-calib" id="arCalib">
+          <button class="tool" id="arLeft" aria-label="Corregir 5 grados a la izquierda">−5°</button>
+          <span class="ar-calib-label" id="arCalibLabel">brújula 0°</span>
+          <button class="tool" id="arRight" aria-label="Corregir 5 grados a la derecha">+5°</button>
+        </div>
+      </div>
+    </div>
+    <div class="ar-start" id="arStart">
+      <h2>Apunta al cielo</h2>
+      <p class="lead">
+        Superpongo sobre la cámara dónde estará el Sol eclipsado, para que
+        compruebes <em>desde el sitio exacto</em> si algo lo tapa: un edificio,
+        un árbol, una loma.
+      </p>
+      <button class="cta" id="btnAR">Activar cámara y sensores</button>
+      <div id="arError" class="notice error" hidden></div>
+      <p class="fineprint">
+        Necesita permisos de cámara y de orientación, y HTTPS (o localhost).
+        La brújula del móvil suele desviarse varios grados: calíbrala moviendo
+        el teléfono en forma de 8 si la posición no cuadra.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────── Vista: SIMULACIÓN 3D ─────────── -->
+  <section class="view" id="view-orbita">
+    <div id="orbitStage"></div>
+    <div class="orbit-controls">
+      <div class="orbit-time">
+        <strong id="orbitClock">—</strong>
+        <small id="orbitPhase"></small>
+      </div>
+      <input type="range" id="orbitSlider" min="0" max="1000" value="500" aria-label="Momento">
+      <div class="orbit-buttons">
+        <button class="tool" id="orbitPlay">▶</button>
+        <button class="tool" id="orbitSpeed">1×</button>
+        <button class="tool" id="orbitView">Vista</button>
+        <button class="tool" id="orbitReal">Ahora</button>
+      </div>
+    </div>
+    <details class="orbit-note" id="orbitNote">
+      <summary>¿Qué está a escala?</summary>
+      Las posiciones de la Luna y el Sol son reales, calculadas con las mismas
+      efemérides que el resto de la app: la sombra cae donde caerá de verdad.
+      <br><br>
+      En las vistas <strong>Tierra</strong> y <strong>Sombra</strong> todo está
+      a escala, incluida la mancha de umbra.
+      En <strong>Sistema</strong> los cuerpos se dibujan 20 veces más grandes de
+      lo que les toca, porque la Luna está a 60 radios terrestres y a escala
+      estricta sería un punto invisible; las distancias sí son las reales.
+      El Sol se sitúa en su dirección correcta pero mucho más cerca: a escala
+      quedaría a 23.500 radios terrestres, fuera de cualquier pantalla.
+    </details>
+  </section>
+
+</main>
+
+<!-- ══ Panel deslizante de detalles ══ -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-head">
+    <span class="grip"></span>
+    <button class="close" id="sheetClose" aria-label="Cerrar">×</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<!-- ══ Navegación inferior ══ -->
+<nav class="tabbar">
+  <button class="tab active" data-view="mapa">
+    <svg viewBox="0 0 24 24" class="ico"><path d="m15 19-6-2.1V5l6 2.1V19zm2-.1V6.8l4-1.5v12.1L17 18.9zM7 18.2 3 19.7V7.6L7 6.1v12.1z"/></svg>
+    <span>Mapa</span>
+  </button>
+  <button class="tab" data-view="horizonte">
+    <svg viewBox="0 0 24 24" class="ico"><path d="M2 20h20v2H2v-2zm2.5-2L10 8l4 6 2.5-4 5 8h-17z"/></svg>
+    <span>Horizonte</span>
+  </button>
+  <button class="tab" data-view="nubes">
+    <svg viewBox="0 0 24 24" class="ico"><path d="M19.4 10a7 7 0 0 0-13.2-2A5 5 0 0 0 6 18h13a4 4 0 0 0 .4-8z"/></svg>
+    <span>Nubes</span>
+  </button>
+  <button class="tab" data-view="ar">
+    <svg viewBox="0 0 24 24" class="ico"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm9-3h-3.2l-1.5-2H7.7L6.2 6H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-9 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+    <span>AR</span>
+  </button>
+  <button class="tab" data-view="orbita">
+    <svg viewBox="0 0 24 24" class="ico"><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+    <span>Órbitas</span>
+  </button>
+</nav>
+
+<!-- ══ Buscador de lugar ══ -->
+<dialog class="dialog" id="placeDialog">
+  <form method="dialog">
+    <h3>Elegir ubicación</h3>
+    <input type="search" id="placeSearch" placeholder="Busca una ciudad o pueblo…" autocomplete="off">
+    <div id="placeResults" class="place-results"></div>
+    <div class="dialog-actions">
+      <button value="cancel" class="cta ghost">Cerrar</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Entorno — NUNCA commitear valores reales
+.env
+.env.local
+.env*.local
+
+# Dependencias y build
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Varios
+.DS_Store
+*.log
+.vercel
+
+# Python
+__pycache__/
+*.pyc
+
+# Material de referencia de My Fishing Maps — plantillas Next.js que quedaron
+# sin usar al hacer la app estática, y describen infraestructura propia.
+.env.example
+MAPTILER_SETUP.md
+TESELAS_S3.md
+Mapa.tsx
+config.ts

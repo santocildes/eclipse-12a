@@ -25,10 +25,10 @@
       <small id="placeCoords">—</small>
     </span>
   </button>
-  <div class="verdict" id="verdict" hidden>
+  <button class="verdict" id="verdict" hidden aria-label="Ver detalles del eclipse">
     <span class="verdict-badge" id="verdictBadge">—</span>
     <span class="verdict-sub" id="verdictSub"></span>
-  </div>
+  </button>
 </header>
 
 <!-- ══ Cuenta atrás ══ -->
@@ -44,26 +44,18 @@
     <div id="map"></div>
 
     <div class="map-tools">
-      <button class="tool" id="btn3d" title="Alternar relieve 3D">3D</button>
-      <button class="tool" id="btnBasemap" title="Cambiar fondo">
+      <button class="tool" id="btnLayers" title="Capas">
         <svg viewBox="0 0 24 24" class="ico"><path d="M12 2 2 7l10 5 10-5-10-5zm0 20 10-5-2.5-1.25L12 19.5 4.5 15.75 2 17l10 5zm0-6 10-5-2.5-1.25L12 13.5 4.5 9.75 2 11l10 5z"/></svg>
       </button>
       <button class="tool" id="btnLocate" title="Mi ubicación">
         <svg viewBox="0 0 24 24" class="ico"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
       </button>
-      <button class="tool" id="btnSunLine" title="Dirección del Sol">☀</button>
+      <button class="tool" id="btnNorte" title="Volver al norte" hidden>
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 2 6 22l6-4 6 4z"/></svg>
+      </button>
     </div>
 
-    <div class="legend" id="legend">
-      <div class="legend-row"><i class="sw sw-band"></i> Franja de totalidad</div>
-      <div class="legend-row"><i class="sw sw-center"></i> Línea central</div>
-      <div class="legend-row" id="legendSun" hidden><i class="sw sw-sun"></i> Dirección del Sol en el máximo</div>
-    </div>
-
-    <button class="sheet-handle" id="sheetHandle" aria-label="Ver detalles">
-      <span class="grip"></span>
-      <span id="handleSummary">Toca el mapa para elegir un punto</span>
-    </button>
+    <div class="map-hint" id="mapHint">Toca el mapa para elegir un punto</div>
   </section>
 
   <!-- ─────────── Vista: HORIZONTE ─────────── -->
@@ -226,6 +218,49 @@
     <div class="dialog-actions">
       <button value="cancel" class="cta ghost">Cerrar</button>
     </div>
+  </form>
+</dialog>
+
+<!-- ══ Panel de capas ══
+     Sustituye a la leyenda fija: cada fila lleva su muestrario de color, así
+     que el propio panel ES la leyenda y el mapa queda despejado. -->
+<dialog class="dialog dialog-bottom" id="layersDialog">
+  <form method="dialog">
+    <div class="dialog-head">
+      <h3>Capas</h3>
+      <button value="cerrar" class="close" aria-label="Cerrar">×</button>
+    </div>
+
+    <h4 class="grp">Fondo del mapa</h4>
+    <div class="opts" id="basemapOpts">
+      <label class="opt"><input type="radio" name="basemap" value="relieve" checked>
+        <span class="opt-txt">Relieve<small>Fondo claro y neutro</small></span></label>
+      <label class="opt"><input type="radio" name="basemap" value="ign">
+        <span class="opt-txt">Mapa IGN<small>Cartografía oficial española</small></span></label>
+      <label class="opt"><input type="radio" name="basemap" value="satelite">
+        <span class="opt-txt">Ortofoto PNOA<small>Satélite del IGN — solo España</small></span></label>
+    </div>
+
+    <h4 class="grp">Sobre el mapa</h4>
+    <div class="opts">
+      <label class="opt"><input type="checkbox" id="lyBanda" checked>
+        <i class="sw sw-band"></i>
+        <span class="opt-txt">Franja de totalidad<small>Dónde el eclipse es total</small></span></label>
+      <label class="opt"><input type="checkbox" id="lyCentral" checked>
+        <i class="sw sw-center"></i>
+        <span class="opt-txt">Línea central<small>Máxima duración</small></span></label>
+      <label class="opt"><input type="checkbox" id="lySol">
+        <i class="sw sw-sun"></i>
+        <span class="opt-txt">Dirección del Sol<small>Gira el mapa y traza hacia dónde mirar</small></span></label>
+      <label class="opt"><input type="checkbox" id="lySombras">
+        <i class="sw sw-shadow"></i>
+        <span class="opt-txt">Zonas en sombra<small>Dónde el relieve tapa el Sol</small></span></label>
+      <label class="opt"><input type="checkbox" id="ly3D">
+        <i class="sw sw-relief"></i>
+        <span class="opt-txt">Relieve en 3D<small>Inclina la cámara</small></span></label>
+    </div>
+
+    <div class="progress" id="sombrasProgress" hidden><div class="bar"></div></div>
   </form>
 </dialog>
 

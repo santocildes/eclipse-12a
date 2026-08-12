@@ -127,6 +127,89 @@ export function elevationAtSync(lat, lon, z) {
   return (h00 * (1 - fx) + h10 * fx) * (1 - fy) + (h01 * (1 - fx) + h11 * fx) * fy;
 }
 
+/**
+ * Carga las teselas que cubren un recuadro geográfico. Se usa para la capa de
+ * sombras, que necesita el terreno de toda la pantalla y no de un disco.
+ *
+ * @returns {Promise<number>} fracción de teselas descargadas con éxito
+ */
+export async function ensureTilesForBBox(bbox, z, onProgress) {
+  const { west, south, east, north } = bbox;
+  const a = lonLatToTileFraction(west, north, z);
+  const b = lonLatToTileFraction(east, south, z);
+  const n = 2 ** z;
+
+  const x0 = Math.floor(a.x), x1 = Math.floor(b.x);
+  const y0 = Math.floor(a.y), y1 = Math.floor(b.y);
+
+  const jobs = [];
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      if (y < 0 || y >= n) continue;
+      jobs.push(loadTile(z, ((x % n) + n) % n, y));
+    }
+  }
+  // Techo de seguridad: un recuadro enorme a zoom alto pediría miles de
+  // teselas. El zoom ya se elige en función de la resolución, así que llegar
+  // aquí significa que algo va mal.
+  if (jobs.length > 400) {
+    console.warn(`[terreno] ${jobs.length} teselas para el recuadro; se aborta`);
+    return 0;
+  }
+
+  const res = await Promise.all(jobs);
+  onProgress?.(0.6);
+  return jobs.length ? res.filter(Boolean).length / jobs.length : 0;
+}
+
+/**
+ * Recorre el rayo visual hacia el Sol y devuelve dónde deja de estar despejado.
+ *
+ * Sirve para pintar la línea de dirección del Sol en dos tramos: hasta el punto
+ * donde el terreno se interpone, y a partir de ahí. Sin eso, la línea se dibuja
+ * por encima del relieve y no dice nada sobre si ese relieve te va a tapar.
+ *
+ * @returns {Promise<{
+ *   puntos: Array<{lat:number, lon:number, distM:number, bloqueado:boolean}>,
+ *   distanciaBloqueoM: number|null, alturaHorizonte: number
+ * }>}
+ */
+export async function sunRayProfile(lat, lon, azimut, sunAlt, opts = {}) {
+  const { maxDistM = 60000, pasoM = 200, observerHeight = 1.6 } = opts;
+
+  // Dos niveles como en el perfil de horizonte: el terreno cercano decide más.
+  await ensureTilesAround(lat, lon, 6000, 13);
+  await ensureTilesAround(lat, lon, maxDistM, 10);
+
+  const base = elevationAtSync(lat, lon, 13) ?? elevationAtSync(lat, lon, 10) ?? 0;
+  const ojo = base + observerHeight;
+
+  const puntos = [];
+  let maxAngulo = -90;
+  let distanciaBloqueoM = null;
+
+  for (let d = pasoM; d <= maxDistM; d += pasoM) {
+    const p = destinationPoint(lat, lon, azimut, d);
+    const z = d <= 6000
+      ? (elevationAtSync(p.lat, p.lon, 13) ?? elevationAtSync(p.lat, p.lon, 10))
+      : elevationAtSync(p.lat, p.lon, 10);
+    if (z === null) continue;
+
+    const caida = (d * d) / (2 * EFFECTIVE_R);
+    const angulo = Math.atan2(z - ojo - caida, d) / DEG;
+    if (angulo > maxAngulo) maxAngulo = angulo;
+
+    // Una vez que el terreno acumulado supera la altura del Sol, todo lo que
+    // venga después queda detrás del obstáculo: el bloqueo es permanente.
+    const bloqueado = maxAngulo >= sunAlt;
+    if (bloqueado && distanciaBloqueoM === null) distanciaBloqueoM = d;
+
+    puntos.push({ lat: p.lat, lon: p.lon, distM: d, bloqueado });
+  }
+
+  return { puntos, distanciaBloqueoM, alturaHorizonte: maxAngulo };
+}
+
 /** Garantiza que estén cargadas todas las teselas de un disco alrededor de un punto. */
 async function ensureTilesAround(lat, lon, radiusM, z) {
   const n = 2 ** z;

@@ -120,24 +120,18 @@ function renderHeader() {
   if (c.type === 'total') {
     badge.textContent = 'Total';
     badge.className = 'verdict-badge total';
-    sub.textContent = `${fmtDuration(c.durationTotality)} · ${fmtTimeShort(c.max.date)}`;
+    sub.textContent = `${fmtDuration(c.durationTotality)} · ${fmtTime(c.max.date)}`;
   } else {
     const pct = (c.max.obscuration * 100).toFixed(pctDigits(c.max.obscuration));
     badge.textContent = `Parcial ${pct}%`;
     badge.className = 'verdict-badge parcial';
-    sub.textContent = `Máximo a las ${fmtTimeShort(c.max.date)}`;
+    sub.textContent = `Máximo ${fmtTime(c.max.date)}`;
   }
   if (!c.sunUpAtMax) {
     badge.textContent = 'Bajo el horizonte';
     badge.className = 'verdict-badge blocked';
   }
 
-  const summary = $('handleSummary');
-  if (summary) {
-    summary.textContent = c.type === 'total'
-      ? `Totalidad de ${fmtDuration(c.durationTotality)} · Sol a ${c.max.sun.alt.toFixed(1)}° sobre el horizonte`
-      : `Parcial del ${(c.max.obscuration * 100).toFixed(1)}% · toca para ver los detalles`;
-  }
 }
 
 // Con obscuraciones del 99.9% redondear a un decimal borra la diferencia entre
@@ -271,13 +265,21 @@ function tickCountdown() {
   if (live) modules.ar?.tick?.();
 }
 
+/**
+ * Cuenta atrás con SEGUNDOS siempre visibles. Ver correr los segundos comunica
+ * que la cuenta está viva y que el evento tiene un instante exacto; con solo
+ * horas y minutos la cifra parecía congelada durante 60 segundos seguidos.
+ */
 function hms(ms) {
   const t = Math.max(0, Math.floor(ms / 1000));
   const d = Math.floor(t / 86400);
-  if (d > 0) return `${d} d ${Math.floor((t % 86400) / 3600)} h`;
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
-  return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m`
-               : `${m}:${String(s).padStart(2, '0')}`;
+  const h = Math.floor((t % 86400) / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  const dosCifras = (n) => String(n).padStart(2, '0');
+  if (d > 0) return `${d} d ${dosCifras(h)}:${dosCifras(m)}:${dosCifras(s)}`;
+  if (h > 0) return `${h}:${dosCifras(m)}:${dosCifras(s)}`;
+  return `${m}:${dosCifras(s)}`;
 }
 
 // ── Navegación entre vistas ──────────────────────────────────────────────────
@@ -400,7 +402,9 @@ export function locateMe() {
 
 function initSheet() {
   const sheet = $('sheet');
-  $('sheetHandle')?.addEventListener('click', () => { sheet.hidden = false; });
+  // El resumen de la cabecera abre el detalle: al quitar la franja inferior
+  // hacía falta un acceso, y el sitio natural es el propio dato resumido.
+  $('verdict')?.addEventListener('click', () => { sheet.hidden = false; });
   $('sheetClose')?.addEventListener('click', () => { sheet.hidden = true; });
 }
 

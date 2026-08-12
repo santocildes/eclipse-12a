@@ -1,7 +1,14 @@
 # Eclipse 12A — ¿Se verá desde aquí?
 
+**▶ https://santocildes.github.io/eclipse-12a/**
+
 PWA para planificar la observación del **eclipse total de Sol del 12 de agosto
 de 2026** en España.
+
+> Se instala desde el navegador: en iPhone, **Safari → Compartir → Añadir a
+> pantalla de inicio**. Hace falta Safari (no Chrome) para que iOS conceda
+> acceso a la cámara y a los sensores de orientación que usa la vista de
+> realidad aumentada.
 
 La pregunta que responde no es "¿a qué hora es?" —eso lo dice cualquier web—
 sino **"¿lo veré desde donde pienso ponerme?"**. Porque en España este eclipse

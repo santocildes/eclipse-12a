@@ -8,7 +8,7 @@
 // Los datos externos (teselas, meteorología) se sirven de caché si están, pero
 // nunca bloquean: si no hay red, la app funciona igual, solo que sin mapa nuevo.
 
-const VERSION = 'eclipse-v1';
+const VERSION = 'eclipse-v2';
 const NUCLEO = `${VERSION}-nucleo`;
 const TESELAS = `${VERSION}-teselas`;
 const DATOS = `${VERSION}-datos`;
@@ -28,6 +28,7 @@ const ARCHIVOS_NUCLEO = [
   './js/config.js',
   './js/places.js',
   './js/terrain.js',
+  './js/terrain-shadow.js',
   './js/clouds.js',
   './js/map.js',
   './js/horizon-view.js',

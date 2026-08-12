@@ -411,8 +411,11 @@ function initSheet() {
 // ── Arranque ─────────────────────────────────────────────────────────────────
 
 function init() {
-  restoreLocation();
+  const habiaUbicacion = restoreLocation();
   recompute();
+  // La pista de "toca el mapa" solo tiene sentido la primera vez: quien ya
+  // eligió un sitio en una visita anterior no necesita que se lo recuerden.
+  if (habiaUbicacion) $('mapHint')?.setAttribute('hidden', '');
 
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => showView(tab.dataset.view));
@@ -426,9 +429,46 @@ function init() {
 
   showView('mapa');
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* sin offline, seguimos */ });
-  }
+  registrarServiceWorker();
+}
+
+/**
+ * Registra el service worker y recarga UNA vez cuando entra una versión nueva.
+ *
+ * Sin esto, al publicar cambios el usuario ve todavía el código viejo: el SW
+ * anterior sigue sirviendo su caché a la página ya cargada, y haría falta
+ * recargar dos veces para ver nada. Con la app instalada en la pantalla de
+ * inicio eso es especialmente confuso, porque no hay barra de navegación donde
+ * forzar el refresco.
+ */
+function registrarServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  let recargando = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // El guardia evita el bucle: `clients.claim()` puede disparar el evento
+    // también en la primera instalación, cuando no hay nada que recargar.
+    if (recargando) return;
+    recargando = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker.register('sw.js')
+    .then((reg) => {
+      // Al volver a la app, comprobar si hay versión nueva esperando.
+      reg.addEventListener('updatefound', () => {
+        const nuevo = reg.installing;
+        nuevo?.addEventListener('statechange', () => {
+          if (nuevo.state === 'installed' && navigator.serviceWorker.controller) {
+            toast('Actualizando a la versión nueva…', 1800);
+          }
+        });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    })
+    .catch(() => { /* sin modo offline, la app sigue funcionando */ });
 }
 
 // Exportado para que otras vistas puedan pedir un cambio de pestaña.

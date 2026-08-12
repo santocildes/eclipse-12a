@@ -1,23 +1,40 @@
-// js/horizon-view.js — perfil de horizonte y veredicto de visibilidad.
+// js/horizon-view.js — perfil del terreno en la dirección del Sol.
+//
+// El gráfico es una SECCIÓN del terreno a lo largo del rayo visual: distancia
+// en horizontal, altura en vertical. Sobre ella se traza el rayo del Sol en el
+// momento del eclipse. Si el terreno cruza por encima de la recta, te tapa —y
+// se ve exactamente dónde y a qué distancia.
+//
+// Antes había un gráfico de los 360°, que decía mucho de golpe pero no
+// respondía a lo único que importa: qué hay entre tú y el Sol.
 
-import { horizonProfile, checkVisibility, findBetterSpots } from './terrain.js';
+import {
+  horizonProfile, checkVisibility, findBetterSpots, sunRayProfile,
+  sunsetBehindTerrain,
+} from './terrain.js';
 import { eclipseState } from './eclipse.js';
-import { state, setLocation, recompute, toast, cardinal } from './app.js';
+import { state, setLocation, recompute, toast, cardinal, fmtTime } from './app.js';
 
 const $ = (id) => document.getElementById(id);
 let calculando = false;
+let perfilRayo = null;
+
+// Alcance de la sección. Más allá de 40 km, con el Sol a estas alturas, haría
+// falta una montaña imposible para tapar nada.
+const ALCANCE_M = 40000;
 
 export function init() {
   $('btnHorizon').addEventListener('click', calcular);
   $('btnBetterSpots').addEventListener('click', buscarMejores);
 
-  // Al cambiar de sitio, el perfil anterior deja de valer.
   document.addEventListener('eclipse:location', () => {
     if (!state.horizonProfile) {
       $('horizonResult').hidden = true;
       $('betterSpots').innerHTML = '';
+      perfilRayo = null;
     }
   });
+  window.addEventListener('resize', () => { if (perfilRayo) dibujarSeccion(); });
 }
 
 async function calcular() {
@@ -34,25 +51,40 @@ async function calcular() {
   const bar = prog.querySelector('.bar');
 
   try {
-    const profile = await horizonProfile(state.lat, state.lon, {
-      onProgress: (p) => { bar.style.width = `${Math.round(p * 100)}%`; },
-    });
-
-    if (profile.coverage < 0.5) {
-      toast('No se pudo descargar bastante relieve. ¿Hay conexión?');
-    }
-
     const sun = c.max.sun;
+
+    // La sección en la dirección del Sol es lo que se dibuja; el perfil de 360°
+    // se sigue necesitando para el veredicto y para el ocaso tras el relieve.
+    perfilRayo = await sunRayProfile(state.lat, state.lon, sun.az, sun.alt, {
+      maxDistM: ALCANCE_M, pasoM: 100,
+    });
+    bar.style.width = '55%';
+
+    const profile = await horizonProfile(state.lat, state.lon, {
+      onProgress: (p) => { bar.style.width = `${55 + Math.round(p * 45)}%`; },
+    });
+    if (profile.coverage < 0.5) toast('No se pudo descargar bastante relieve. ¿Hay conexión?');
+
     profile.check = checkVisibility(profile, sun.az, sun.alt);
     state.horizonProfile = profile;
 
-    // La altitud medida del terreno suele diferir de la que traía la ciudad;
-    // se adopta la real porque cambia los tiempos ligeramente.
+    // La altitud medida suele diferir de la que traía la ciudad; se adopta la
+    // real porque cambia ligeramente los tiempos.
     if (Math.abs(profile.observerElevation - state.elev) > 40) {
       state.elev = profile.observerElevation;
       recompute();
       profile.check = checkVisibility(profile, state.circ.max.sun.az, state.circ.max.sun.alt);
     }
+
+    // Ocaso real: cuándo el Sol se mete detrás del relieve.
+    const obs = { lat: state.lat, lon: state.lon, elev: state.elev };
+    const posSol = (d) => {
+      const st = eclipseState(d, obs);
+      return { alt: st.sun.alt, az: st.sun.az };
+    };
+    profile.ocasoRelieve = sunsetBehindTerrain(
+      profile, posSol, c.max.date.getTime() - 3 * 3600000, c.max.date.getTime() + 5 * 3600000,
+    );
 
     render(profile);
     $('horizonResult').hidden = false;
@@ -82,20 +114,19 @@ function render(profile) {
     titulo = 'Desde aquí no lo verás';
     texto = `En dirección ${cardinal(sun.az)} el terreno se levanta hasta
       ${horizonAlt.toFixed(1)}°, y el Sol solo llegará a ${sun.alt.toFixed(1)}°.
-      El obstáculo está a unos ${(obstacleDistanceM / 1000).toFixed(1)} km.
+      El obstáculo está a unos ${((perfilRayo?.distanciaBloqueoM ?? obstacleDistanceM) / 1000).toFixed(1)} km.
       Tendrás que moverte.`;
   } else if (margin < 1) {
     cls = 'tight';
     titulo = 'Al límite';
     texto = `El Sol quedará solo ${margin.toFixed(1)}° por encima del relieve —
       apenas ${(margin / 0.53).toFixed(1)} diámetros solares. Cualquier árbol o
-      edificio que no esté en el modelo del terreno puede taparlo. Busca un punto
-      algo más alto o despejado.`;
+      edificio que no esté en el modelo del terreno puede taparlo.`;
   } else if (margin < 3) {
     cls = 'tight';
     titulo = 'Justo, pero se ve';
-    texto = `El Sol quedará ${margin.toFixed(1)}° sobre el horizonte real
-      (relieve a ${horizonAlt.toFixed(1)}°). Vigila los obstáculos cercanos:
+    texto = `El Sol quedará ${margin.toFixed(1)}° sobre el relieve real
+      (horizonte a ${horizonAlt.toFixed(1)}°). Vigila los obstáculos cercanos:
       el modelo del terreno no incluye ni arbolado ni edificios.`;
   } else {
     cls = 'ok';
@@ -108,6 +139,7 @@ function render(profile) {
   card.innerHTML = `<div class="big">${titulo}</div><p>${texto}</p>`;
 
   // ── Estadísticas ──
+  const oc = profile.ocasoRelieve;
   $('horizonStats').innerHTML = `
     <div class="stat"><div class="k">Tu altitud</div>
       <div class="v">${Math.round(profile.observerElevation)}<span class="u"> m</span></div></div>
@@ -119,109 +151,152 @@ function render(profile) {
       <div class="v" style="color:${blocked ? 'var(--bad)' : margin < 3 ? 'var(--mixed)' : 'var(--good)'}">
         ${margin > 0 ? '+' : ''}${margin.toFixed(1)}<span class="u">°</span></div></div>`;
 
-  dibujarPerfil(profile, sun);
+  // ── Ocaso tras el relieve ──
+  // Es el dato que ningún almanaque da: la hora a la que el Sol desaparece
+  // detrás de la ladera, que puede ser bastante antes del ocaso teórico.
+  const box = $('ocasoRelieve');
+  if (oc) {
+    const teorico = state.sunset;
+    const adelanto = teorico ? Math.round((teorico - oc.fecha) / 60000) : null;
+    const finEclipse = c.contacts.c4;
+    const cortaEclipse = finEclipse && oc.fecha < finEclipse;
+    box.hidden = false;
+    box.className = `notice ${cortaEclipse ? 'warn' : ''}`;
+    box.innerHTML = `
+      <strong>El Sol se te oculta a las ${fmtTime(oc.fecha)}</strong>, cuando se
+      mete detrás del relieve (a ${oc.altHorizonte.toFixed(1)}° de altura, hacia
+      el ${cardinal(oc.azimut)}).
+      ${adelanto !== null && adelanto > 1
+        ? `Son <strong>${adelanto} minutos antes</strong> que el ocaso teórico de las
+           ${fmtTime(teorico)}, que supone un horizonte llano.` : ''}
+      ${cortaEclipse
+        ? ` El eclipse termina a las ${fmtTime(finEclipse)}: no llegarás a ver el final.`
+        : ' Llegas a ver el eclipse completo.'}`;
+  } else {
+    box.hidden = true;
+  }
+
+  dibujarSeccion();
 }
 
-// ── Gráfico del perfil ───────────────────────────────────────────────────────
+// ── Sección del terreno ──────────────────────────────────────────────────────
 
-function dibujarPerfil(profile, sun) {
+function dibujarSeccion() {
   const cv = $('horizonChart');
+  if (!perfilRayo?.puntos?.length) return;
+  const c = state.circ;
+  const sun = c.max.sun;
+
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const W = cv.clientWidth || 800, H = 340;
+  const W = cv.clientWidth || 800, H = 320;
   cv.width = W * dpr; cv.height = H * dpr;
   const g = cv.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const padL = 38, padR = 12, padT = 16, padB = 30;
+  const padL = 48, padR = 14, padT = 16, padB = 30;
   const plotW = W - padL - padR, plotH = H - padT - padB;
 
-  // El eje vertical se ajusta al relieve real, con un mínimo para que un
-  // horizonte llano no se vea deformado.
-  const maxH = Math.max(12, Math.ceil(Math.max(...profile.horizon) + 3));
-  const minH = Math.min(-3, Math.floor(Math.min(...profile.horizon) - 1));
-  const yOf = (deg) => padT + plotH * (1 - (deg - minH) / (maxH - minH));
-  const xOf = (az) => padL + plotW * (az / 360);
+  const ojo = perfilRayo.alturaOjo;
+  const pts = perfilRayo.puntos;
+  const maxDist = ALCANCE_M;
 
-  g.fillStyle = '#0e1424';
-  g.fillRect(0, 0, W, H);
+  // El rayo del Sol sube en la gráfica porque la Tierra se curva bajo él: a
+  // 40 km el suelo ya ha caído 107 m. Incluir ese término deja la comparación
+  // exacta aunque el eje vertical siga siendo cota sobre el nivel del mar,
+  // que es lo que la gente sabe leer.
+  const EFECTIVO_R = 6371000 * 7 / 6;
+  const alturaRayo = (d, altGrados) =>
+    ojo + d * Math.tan(altGrados * Math.PI / 180) + (d * d) / (2 * EFECTIVO_R);
 
-  // Rejilla y etiquetas de acimut
-  g.strokeStyle = '#26304a'; g.fillStyle = '#64708c';
-  g.font = '11px system-ui, sans-serif'; g.textAlign = 'center';
-  for (const [az, lbl] of [[0, 'N'], [90, 'E'], [180, 'S'], [270, 'O'], [360, 'N']]) {
-    const x = xOf(az);
-    g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + plotH); g.stroke();
-    g.fillText(lbl, x, H - 10);
-  }
+  const cotas = pts.map((p) => p.elev);
+  const rayoMax = alturaRayo(maxDist, sun.alt);
+  const alto = Math.max(...cotas, rayoMax, ojo + 50);
+  const bajo = Math.min(...cotas, ojo) - 40;
+  const rango = Math.max(120, alto - bajo);
+
+  const xOf = (d) => padL + (plotW * d) / maxDist;
+  const yOf = (z) => padT + plotH * (1 - (z - bajo) / rango);
+
+  g.fillStyle = '#0e1424'; g.fillRect(0, 0, W, H);
+
+  // Rejilla
+  g.font = '11px system-ui, sans-serif';
+  g.strokeStyle = '#1b2338'; g.fillStyle = '#64708c';
   g.textAlign = 'right';
-  for (let d = Math.ceil(minH / 5) * 5; d <= maxH; d += 5) {
-    const y = yOf(d);
-    // La línea del 0° se destaca: es la referencia del horizonte llano.
-    g.strokeStyle = d === 0 ? '#3d4a6b' : '#1b2338';
+  const pasoZ = rango > 2000 ? 500 : rango > 800 ? 200 : 100;
+  for (let z = Math.ceil(bajo / pasoZ) * pasoZ; z <= alto; z += pasoZ) {
+    const y = yOf(z);
     g.beginPath(); g.moveTo(padL, y); g.lineTo(W - padR, y); g.stroke();
-    g.fillStyle = '#64708c';
-    g.fillText(`${d}°`, padL - 6, y + 4);
+    g.fillText(`${z} m`, padL - 6, y + 4);
+  }
+  g.textAlign = 'center';
+  for (let km = 0; km <= maxDist / 1000; km += 10) {
+    const x = xOf(km * 1000);
+    g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + plotH); g.stroke();
+    g.fillText(`${km} km`, x, H - 9);
   }
 
-  // Relleno del terreno
+  // Terreno
   g.beginPath();
-  g.moveTo(xOf(0), padT + plotH);
-  profile.azimuths.forEach((az, i) => g.lineTo(xOf(az), yOf(profile.horizon[i])));
-  g.lineTo(xOf(360), padT + plotH);
+  g.moveTo(xOf(0), yOf(ojo));
+  pts.forEach((p) => g.lineTo(xOf(p.distM), yOf(p.elev)));
+  g.lineTo(xOf(maxDist), padT + plotH);
+  g.lineTo(xOf(0), padT + plotH);
   g.closePath();
   const grad = g.createLinearGradient(0, padT, 0, padT + plotH);
-  grad.addColorStop(0, 'rgba(60,74,110,.85)');
-  grad.addColorStop(1, 'rgba(22,30,51,.95)');
+  grad.addColorStop(0, 'rgba(96,112,150,.9)');
+  grad.addColorStop(1, 'rgba(26,34,58,.95)');
   g.fillStyle = grad; g.fill();
-
   g.beginPath();
-  profile.azimuths.forEach((az, i) => {
-    const x = xOf(az), y = yOf(profile.horizon[i]);
-    i ? g.lineTo(x, y) : g.moveTo(x, y);
-  });
-  g.strokeStyle = '#8fa0c4'; g.lineWidth = 1.5; g.stroke();
+  pts.forEach((p, i) => (i ? g.lineTo(xOf(p.distM), yOf(p.elev)) : g.moveTo(xOf(p.distM), yOf(p.elev))));
+  g.strokeStyle = '#9fb0d0'; g.lineWidth = 1.4; g.stroke();
 
-  // Trayectoria del Sol durante el eclipse: no basta con el punto del máximo,
-  // porque el Sol se mueve mientras dura y puede esconderse a mitad.
-  const c = state.circ;
-  if (c?.contacts?.c1 && c?.contacts?.c4) {
-    const pts = [];
-    const t0 = c.contacts.c1.getTime(), t1 = c.contacts.c4.getTime();
-    for (let i = 0; i <= 40; i++) {
-      const d = new Date(t0 + ((t1 - t0) * i) / 40);
-      const st = eclipseSunAt(d);
-      if (st) pts.push(st);
+  // Rayo al final del eclipse: el Sol sigue bajando mientras dura, y algo que
+  // ahora se ve puede quedar tapado antes del último contacto.
+  if (c.contacts?.c4) {
+    const stFin = eclipseState(c.contacts.c4, { lat: state.lat, lon: state.lon, elev: state.elev });
+    if (stFin.sun.alt > 0) {
+      g.beginPath();
+      g.moveTo(xOf(0), yOf(ojo));
+      g.lineTo(xOf(maxDist), yOf(alturaRayo(maxDist, stFin.sun.alt)));
+      g.strokeStyle = 'rgba(255,178,56,.35)'; g.lineWidth = 1.5;
+      g.setLineDash([5, 4]); g.stroke(); g.setLineDash([]);
     }
-    g.beginPath();
-    pts.forEach((p, i) => {
-      const x = xOf(p.az), y = yOf(p.alt);
-      i ? g.lineTo(x, y) : g.moveTo(x, y);
-    });
-    g.strokeStyle = 'rgba(255,178,56,.5)'; g.lineWidth = 2;
-    g.setLineDash([4, 3]); g.stroke(); g.setLineDash([]);
   }
 
-  // Posición del Sol en el máximo
-  const sx = xOf(sun.az), sy = yOf(sun.alt);
-  const tapado = profile.check.blocked;
-  g.beginPath(); g.arc(sx, sy, 13, 0, Math.PI * 2);
-  g.fillStyle = tapado ? 'rgba(255,92,110,.2)' : 'rgba(255,178,56,.25)'; g.fill();
-  g.beginPath(); g.arc(sx, sy, 6.5, 0, Math.PI * 2);
-  g.fillStyle = tapado ? '#ff5c6e' : '#ffb238'; g.fill();
-  g.strokeStyle = '#0e1424'; g.lineWidth = 2; g.stroke();
+  // Rayo en el máximo
+  g.beginPath();
+  g.moveTo(xOf(0), yOf(ojo));
+  g.lineTo(xOf(maxDist), yOf(alturaRayo(maxDist, sun.alt)));
+  g.strokeStyle = perfilRayo.distanciaBloqueoM !== null ? '#ff5c6e' : '#ffb238';
+  g.lineWidth = 2.5; g.stroke();
 
-  g.fillStyle = tapado ? '#ff9aa6' : '#ffd08a';
+  // Punto de bloqueo
+  if (perfilRayo.distanciaBloqueoM !== null) {
+    const d = perfilRayo.distanciaBloqueoM;
+    const x = xOf(d), y = yOf(alturaRayo(d, sun.alt));
+    g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,92,110,.25)'; g.fill();
+    g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2);
+    g.fillStyle = '#ff5c6e'; g.fill();
+    g.fillStyle = '#ff9aa6';
+    g.font = '600 11px system-ui, sans-serif';
+    g.textAlign = x > W * 0.6 ? 'right' : 'left';
+    g.fillText(`el terreno lo tapa a ${(d / 1000).toFixed(1)} km`,
+               x + (x > W * 0.6 ? -10 : 10), y - 10);
+  }
+
+  // Observador
+  g.beginPath(); g.arc(xOf(0), yOf(ojo), 5, 0, Math.PI * 2);
+  g.fillStyle = '#ffb238'; g.strokeStyle = '#0e1424'; g.lineWidth = 2;
+  g.fill(); g.stroke();
+
+  // Rótulo de dirección
+  g.fillStyle = '#97a2bb';
   g.font = '600 11px system-ui, sans-serif';
-  g.textAlign = sun.az > 300 ? 'right' : 'left';
-  g.fillText(
-    tapado ? 'Sol tapado' : 'Sol en el máximo',
-    sx + (sun.az > 300 ? -12 : 12), sy - 12,
-  );
-}
-
-function eclipseSunAt(date) {
-  const st = eclipseState(date, { lat: state.lat, lon: state.lon, elev: state.elev });
-  return { az: st.sun.az, alt: st.sun.alt };
+  g.textAlign = 'left';
+  g.fillText(`Sección hacia el ${cardinal(sun.az)} (${sun.az.toFixed(0)}°) — la dirección del Sol`,
+             padL + 4, padT + 13);
 }
 
 // ── Búsqueda de puntos mejores ───────────────────────────────────────────────

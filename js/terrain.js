@@ -128,6 +128,18 @@ export function elevationAtSync(lat, lon, z) {
 }
 
 /**
+ * Cota que realmente tapa la vista.
+ *
+ * El modelo de elevación incluye BATIMETRÍA: sobre el mar devuelve profundidades
+ * negativas, de cientos o miles de metros. Para la línea de visión lo que
+ * cuenta es la superficie del agua, no el fondo, así que se recorta a 0. Sin
+ * esto, mirar al mar dibujaba una fosa de 1000 m y el gráfico salía absurdo.
+ */
+function cotaVisible(z) {
+  return z === null ? null : Math.max(0, z);
+}
+
+/**
  * Carga las teselas que cubren un recuadro geográfico. Se usa para la capa de
  * sombras, que necesita el terreno de toda la pantalla y no de un disco.
  *
@@ -181,7 +193,7 @@ export async function sunRayProfile(lat, lon, azimut, sunAlt, opts = {}) {
   await ensureTilesAround(lat, lon, 6000, 13);
   await ensureTilesAround(lat, lon, maxDistM, 10);
 
-  const base = elevationAtSync(lat, lon, 13) ?? elevationAtSync(lat, lon, 10) ?? 0;
+  const base = cotaVisible(elevationAtSync(lat, lon, 13) ?? elevationAtSync(lat, lon, 10)) ?? 0;
   const ojo = base + observerHeight;
 
   const puntos = [];
@@ -190,9 +202,9 @@ export async function sunRayProfile(lat, lon, azimut, sunAlt, opts = {}) {
 
   for (let d = pasoM; d <= maxDistM; d += pasoM) {
     const p = destinationPoint(lat, lon, azimut, d);
-    const z = d <= 6000
+    const z = cotaVisible(d <= 6000
       ? (elevationAtSync(p.lat, p.lon, 13) ?? elevationAtSync(p.lat, p.lon, 10))
-      : elevationAtSync(p.lat, p.lon, 10);
+      : elevationAtSync(p.lat, p.lon, 10));
     if (z === null) continue;
 
     const caida = (d * d) / (2 * EFFECTIVE_R);
@@ -204,10 +216,17 @@ export async function sunRayProfile(lat, lon, azimut, sunAlt, opts = {}) {
     const bloqueado = maxAngulo >= sunAlt;
     if (bloqueado && distanciaBloqueoM === null) distanciaBloqueoM = d;
 
-    puntos.push({ lat: p.lat, lon: p.lon, distM: d, bloqueado });
+    puntos.push({
+      lat: p.lat, lon: p.lon, distM: d, bloqueado,
+      elev: z,          // cota real, para dibujar la sección
+      angulo,           // ángulo bajo el que se ve ese punto
+    });
   }
 
-  return { puntos, distanciaBloqueoM, alturaHorizonte: maxAngulo };
+  return {
+    puntos, distanciaBloqueoM, alturaHorizonte: maxAngulo,
+    elevObservador: base, alturaOjo: ojo,
+  };
 }
 
 /** Garantiza que estén cargadas todas las teselas de un disco alrededor de un punto. */
@@ -271,8 +290,8 @@ export async function horizonProfile(lat, lon, opts = {}) {
     onProgress?.((i + 1) / (TIERS.length + 1));
   }
 
-  const baseElev = elevationAtSync(lat, lon, TIERS[0].z)
-    ?? elevationAtSync(lat, lon, TIERS[1].z) ?? 0;
+  const baseElev = cotaVisible(elevationAtSync(lat, lon, TIERS[0].z)
+    ?? elevationAtSync(lat, lon, TIERS[1].z)) ?? 0;
   const eyeElev = baseElev + observerHeight;
 
   const horizon = new Array(azimuths.length).fill(-90);
@@ -286,7 +305,7 @@ export async function horizonProfile(lat, lon, opts = {}) {
     for (const tier of TIERS) {
       for (let d = tier.fromM; d <= tier.toM; d += tier.stepM) {
         const p = destinationPoint(lat, lon, az, d);
-        const h = elevationAtSync(p.lat, p.lon, tier.z);
+        const h = cotaVisible(elevationAtSync(p.lat, p.lon, tier.z));
         sampled++;
         if (h === null) { missing++; continue; }
 
@@ -312,6 +331,53 @@ export async function horizonProfile(lat, lon, opts = {}) {
     observerElevation: baseElev,
     coverage: sampled ? 1 - missing / sampled : 0,
   };
+}
+
+/**
+ * Instante en que el Sol se esconde tras el RELIEVE, que no es el ocaso.
+ *
+ * El ocaso que publica cualquier almanaque supone un horizonte llano y a nivel
+ * del mar. En un valle el Sol desaparece mucho antes: se mete detrás de la
+ * ladera de enfrente. Y es lo único que importa el día del eclipse, porque
+ * decide si llegas a ver el final del fenómeno o no.
+ *
+ * Como el Sol también se desplaza en acimut mientras baja, se compara su altura
+ * contra el horizonte EN EL ACIMUT QUE OCUPA en cada instante, no contra un
+ * valor fijo.
+ *
+ * @param {object} profile perfil devuelto por horizonProfile (360°)
+ * @param {(d:Date)=>{alt:number, az:number}} posicionSolar
+ * @param {number} desdeMs  instante desde el que buscar
+ * @param {number} hastaMs
+ * @returns {{fecha:Date, altHorizonte:number, azimut:number}|null}
+ */
+export function sunsetBehindTerrain(profile, posicionSolar, desdeMs, hastaMs) {
+  const libre = (ms) => {
+    const s = posicionSolar(new Date(ms));
+    return s.alt - horizonAt(profile, s.az);
+  };
+
+  let anterior = libre(desdeMs);
+  // Si al empezar el Sol ya está tapado, no hay ocultación posterior que buscar.
+  if (anterior <= 0) return null;
+
+  const PASO = 30000;
+  for (let ms = desdeMs + PASO; ms <= hastaMs; ms += PASO) {
+    const actual = libre(ms);
+    if (anterior > 0 && actual <= 0) {
+      // Afinado por bisección en el intervalo donde cambia de signo.
+      let a = ms - PASO, b = ms;
+      for (let i = 0; i < 30 && b - a > 500; i++) {
+        const m = (a + b) / 2;
+        if (libre(m) > 0) a = m; else b = m;
+      }
+      const fecha = new Date((a + b) / 2);
+      const s = posicionSolar(fecha);
+      return { fecha, altHorizonte: horizonAt(profile, s.az), azimut: s.az };
+    }
+    anterior = actual;
+  }
+  return null;
 }
 
 /**

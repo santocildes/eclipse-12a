@@ -50,6 +50,10 @@
       <button class="tool" id="btnLocate" title="Mi ubicación">
         <svg viewBox="0 0 24 24" class="ico"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
       </button>
+      <button class="tool" id="btnSol" title="Dirección del Sol">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-6 2 3h-4l2-3zm0 22-2-3h4l-2 3zM1 12l3-2v4l-3-2zm22 0-3 2v-4l3 2zM4.2 4.2l3.5.7-2.8 2.8-.7-3.5zm15.6 15.6-3.5-.7 2.8-2.8.7 3.5zM4.2 19.8l.7-3.5 2.8 2.8-3.5.7zM19.8 4.2l-.7 3.5-2.8-2.8 3.5-.7z"/></svg>
+      </button>
+      <button class="tool" id="btn3D" title="Relieve en 3D">3D</button>
       <button class="tool" id="btnNorte" title="Volver al norte" hidden>
         <svg viewBox="0 0 24 24" class="ico"><path d="M12 2 6 22l6-4 6 4z"/></svg>
       </button>
@@ -63,9 +67,8 @@
     <div class="pad">
       <h2>¿Te tapa el terreno?</h2>
       <p class="lead" id="horizonLead">
-        Con el Sol tan bajo, el relieve decide. Calculo el perfil del horizonte
-        real en los 360° alrededor de tu punto y lo comparo con la posición del
-        Sol durante el eclipse.
+        Con el Sol tan bajo, el relieve decide. Corto el terreno en la dirección
+        exacta del Sol y lo comparo con la altura que tendrá durante el eclipse.
       </p>
 
       <button class="cta" id="btnHorizon">Calcular mi horizonte</button>
@@ -74,12 +77,15 @@
       <div id="horizonResult" hidden>
         <div class="verdict-card" id="horizonVerdict"></div>
         <figure class="chart-wrap">
-          <canvas id="horizonChart" width="800" height="340"></canvas>
+          <canvas id="horizonChart" width="800" height="320"></canvas>
           <figcaption>
-            Perfil del horizonte alrededor de tu posición. La curva es el terreno;
-            el punto marca dónde estará el Sol en el máximo del eclipse.
+            Corte del terreno en la dirección del Sol: distancia en horizontal,
+            altura en vertical. La recta naranja es el rayo del Sol en el máximo;
+            la punteada, al final del eclipse. Donde el terreno cruza por encima,
+            te tapa. El rayo sube ligeramente porque la Tierra se curva bajo él.
           </figcaption>
         </figure>
+        <div id="ocasoRelieve" class="notice" hidden></div>
         <div id="horizonStats" class="stats"></div>
         <button class="cta ghost" id="btnBetterSpots">Buscar un punto mejor cerca</button>
         <div id="betterSpots"></div>
@@ -99,7 +105,6 @@
           <canvas id="cloudChart" width="800" height="240"></canvas>
           <figcaption>Nubosidad hora a hora. La banda marca el eclipse.</figcaption>
         </figure>
-        <button class="cta ghost" id="btnCloudMap">Ver mapa de nubes en la franja</button>
         <p class="fineprint">
           Fuente: Open-Meteo (modelo ICON/GFS). La previsión solo es fiable
           dentro de los 16 días previos, y la nubosidad a escala local puede
@@ -124,8 +129,28 @@
           <span class="ar-calib-label" id="arCalibLabel">brújula 0°</span>
           <button class="tool" id="arRight" aria-label="Corregir 5 grados a la derecha">+5°</button>
         </div>
+        <button class="cta ar-freeze" id="btnVerEclipse">Ver el eclipse aquí</button>
       </div>
     </div>
+    <!-- Modo congelado: se captura un fotograma y el eclipse se anima encima,
+         para poder mirarlo con calma sin sostener el móvil apuntando al cielo. -->
+    <div class="ar-frozen" id="arFrozen" hidden>
+      <canvas id="arFrozenCanvas"></canvas>
+      <div class="frozen-bar">
+        <div class="frozen-time">
+          <strong id="frozenClock">—</strong>
+          <small id="frozenPhase"></small>
+        </div>
+        <input type="range" id="frozenSlider" min="0" max="1000" value="500" aria-label="Momento del eclipse">
+        <div class="frozen-buttons">
+          <button class="tool" id="frozenPlay">▶</button>
+          <button class="tool" id="frozenSpeed">60×</button>
+          <button class="tool" id="frozenMax">Máximo</button>
+          <button class="tool" id="frozenBack">Cámara</button>
+        </div>
+      </div>
+    </div>
+
     <div class="ar-start" id="arStart">
       <h2>Apunta al cielo</h2>
       <p class="lead">
@@ -152,6 +177,10 @@
         <small id="orbitPhase"></small>
       </div>
       <input type="range" id="orbitSlider" min="0" max="1000" value="500" aria-label="Momento">
+      <div class="orbit-zoom">
+        <button class="tool" id="orbitZoomOut" aria-label="Alejar">−</button>
+        <button class="tool" id="orbitZoomIn" aria-label="Acercar">+</button>
+      </div>
       <div class="orbit-buttons">
         <button class="tool" id="orbitPlay">▶</button>
         <button class="tool" id="orbitSpeed">1×</button>
@@ -249,15 +278,12 @@
       <label class="opt"><input type="checkbox" id="lyCentral" checked>
         <i class="sw sw-center"></i>
         <span class="opt-txt">Línea central<small>Máxima duración</small></span></label>
-      <label class="opt"><input type="checkbox" id="lySol">
-        <i class="sw sw-sun"></i>
-        <span class="opt-txt">Dirección del Sol<small>Gira el mapa y traza hacia dónde mirar</small></span></label>
       <label class="opt"><input type="checkbox" id="lySombras">
         <i class="sw sw-shadow"></i>
         <span class="opt-txt">Zonas en sombra<small>Dónde el relieve tapa el Sol</small></span></label>
-      <label class="opt"><input type="checkbox" id="ly3D">
-        <i class="sw sw-relief"></i>
-        <span class="opt-txt">Relieve en 3D<small>Inclina la cámara</small></span></label>
+      <label class="opt"><input type="checkbox" id="lyNubes">
+        <i class="sw sw-clouds"></i>
+        <span class="opt-txt">Nubosidad prevista<small>A la hora del eclipse, sobre la franja</small></span></label>
     </div>
 
     <div class="progress" id="sombrasProgress" hidden><div class="bar"></div></div>

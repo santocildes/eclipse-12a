@@ -3,7 +3,7 @@
 import {
   fetchPointForecast, visibilityScore, scoreLabel, forecastAvailable, daysUntil,
 } from './clouds.js';
-import { state, toast, showView } from './app.js';
+import { state, toast } from './app.js';
 
 const $ = (id) => document.getElementById(id);
 let cargando = false;
@@ -11,7 +11,6 @@ let cargando = false;
 export function init() {
   cargar();
   document.addEventListener('eclipse:location', () => { cargar(); });
-  $('btnCloudMap').addEventListener('click', abrirMapaNubes);
 }
 
 function horaObjetivoUTC() {
@@ -198,13 +197,3 @@ function dibujarSerie(hourly) {
   }
 }
 
-function abrirMapaNubes() {
-  toast('Dibujando la nubosidad sobre la franja…');
-  showView('mapa');
-  import('./cloud-map.js')
-    .then((m) => m.mostrarRejillaNubes())
-    .catch((err) => {
-      console.error(err);
-      toast('No se pudo cargar el mapa de nubes');
-    });
-}

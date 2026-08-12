@@ -16,6 +16,7 @@ const capas = {
   central: true,
   sol: false,
   sombras: false,
+  nubes: false,
   relieve3D: false,
 };
 
@@ -170,6 +171,8 @@ function aplicarVisibilidad() {
   v('central-line', capas.central);
   v('sunline-line', capas.sol);
   v('sombras-img', capas.sombras);
+  v('nubes-heat', capas.nubes);
+  v('nubes-pct', capas.nubes);
 }
 
 function aplicarRelieve3D() {
@@ -294,12 +297,18 @@ function programarSombras(retardo = 450) {
 
 async function recalcularSombras() {
   if (!capas.sombras || !map || sombrasCalculando) return;
-  // Muy alejado, la sombra del relieve no aporta y el cálculo sería enorme.
-  if (map.getZoom() < 6) {
+  // A escala peninsular la sombra sale gruesa —la resolución del terreno no da
+  // para más— pero es justo la vista de conjunto que sirve para decidir a dónde
+  // ir, así que se calcula igual. Solo por debajo de zoom 4 deja de tener
+  // sentido y el recuadro sería medio planeta.
+  if (map.getZoom() < 4) {
     if (map.getLayer('sombras-img')) map.setLayoutProperty('sombras-img', 'visibility', 'none');
-    toast('Acércate para ver las sombras del relieve');
+    toast('Acércate un poco para calcular las sombras');
     return;
   }
+  // Cuanto más lejos, más raster hace falta para que la sombra no salga a
+  // manchas: el número de teselas se mantiene porque el zoom del MDT se ajusta.
+  const lado = map.getZoom() < 7 ? 512 : 384;
 
   sombrasCalculando = true;
   const barra = document.getElementById('sombrasProgress');
@@ -312,7 +321,7 @@ async function recalcularSombras() {
       west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(),
     };
     const res = await computeShadowMask(bbox, {
-      size: 384,
+      size: lado,
       onProgress: (p) => { if (relleno) relleno.style.width = `${Math.round(p * 100)}%`; },
     });
 
@@ -370,9 +379,8 @@ function cablearPanel() {
     document.querySelector(`input[name="basemap"][value="${basemap}"]`).checked = true;
     document.getElementById('lyBanda').checked = capas.banda;
     document.getElementById('lyCentral').checked = capas.central;
-    document.getElementById('lySol').checked = capas.sol;
     document.getElementById('lySombras').checked = capas.sombras;
-    document.getElementById('ly3D').checked = capas.relieve3D;
+    document.getElementById('lyNubes').checked = capas.nubes;
     dlg.showModal();
   });
 
@@ -398,9 +406,41 @@ function cablearPanel() {
   alternar('lyBanda', 'banda');
   alternar('lyCentral', 'central');
 
-  alternar('lySol', 'sol', (on) => {
+  alternar('lySombras', 'sombras', (on) => {
+    if (on) programarSombras(0);
+    else if (map.getLayer('sombras-img')) {
+      map.setLayoutProperty('sombras-img', 'visibility', 'none');
+    }
+  });
+
+  alternar('lyNubes', 'nubes', async (on) => {
+    if (!on) {
+      const m = await import('./cloud-map.js');
+      m.ocultarRejillaNubes();
+      return;
+    }
+    toast('Consultando la nubosidad prevista…');
+    try {
+      const m = await import('./cloud-map.js');
+      await m.mostrarRejillaNubes();
+    } catch (err) {
+      console.error(err);
+      toast('No se pudo cargar la nubosidad');
+      capas.nubes = false;
+      document.getElementById('lyNubes').checked = false;
+    }
+  });
+}
+
+// ── Botones flotantes ────────────────────────────────────────────────────────
+
+function cablearBotones() {
+  document.getElementById('btnSol').addEventListener('click', (ev) => {
+    capas.sol = !capas.sol;
+    ev.currentTarget.classList.toggle('on', capas.sol);
+    aplicarVisibilidad();
     updateSunLine();
-    if (on) {
+    if (capas.sol) {
       orientarHaciaElSol();
       const s = state.circ?.max?.sun;
       if (s) toast(`Mira al ${cardinal(s.az)} (${s.az.toFixed(0)}°), a ${s.alt.toFixed(1)}° de altura`);
@@ -409,22 +449,22 @@ function cablearPanel() {
     }
   });
 
-  alternar('lySombras', 'sombras', (on) => {
-    if (on) programarSombras(0);
-    else if (map.getLayer('sombras-img')) {
-      map.setLayoutProperty('sombras-img', 'visibility', 'none');
-    }
-  });
-
-  alternar('ly3D', 'relieve3D', (on) => {
+  document.getElementById('btn3D').addEventListener('click', (ev) => {
+    capas.relieve3D = !capas.relieve3D;
+    ev.currentTarget.classList.toggle('on', capas.relieve3D);
     aplicarRelieve3D();
     map.easeTo({
-      pitch: on ? 62 : 0,
+      pitch: capas.relieve3D ? 62 : 0,
       // El relieve no se aprecia desde muy alto: al activarlo, nos acercamos.
-      zoom: on ? Math.max(map.getZoom(), 8.5) : map.getZoom(),
+      zoom: capas.relieve3D ? Math.max(map.getZoom(), 8.5) : map.getZoom(),
       duration: 900,
     });
   });
+
+  document.getElementById('btnLocate').addEventListener('click', async () => {
+    try { await locateMe(); flyToLocation(); } catch { /* locateMe ya avisa */ }
+  });
+  document.getElementById('btnNorte').addEventListener('click', volverAlNorte);
 }
 
 // ── API pública del módulo ───────────────────────────────────────────────────
@@ -460,12 +500,8 @@ export async function init() {
     document.getElementById('btnNorte').hidden = Math.abs(map.getBearing()) < 1;
   });
 
-  document.getElementById('btnLocate').addEventListener('click', async () => {
-    try { await locateMe(); flyToLocation(); } catch { /* locateMe ya avisa */ }
-  });
-  document.getElementById('btnNorte').addEventListener('click', volverAlNorte);
-
   cablearPanel();
+  cablearBotones();
 
   await new Promise((res) => map.once('load', res));
 }

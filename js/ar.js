@@ -12,7 +12,7 @@
 
 import { eclipseState } from './eclipse.js';
 import { horizonAt } from './terrain.js';
-import { state, toast, cardinal, fmtTimeShort } from './app.js';
+import { state, toast, cardinal, fmtTimeShort, fmtTime } from './app.js';
 
 const DEG = Math.PI / 180;
 const $ = (id) => document.getElementById(id);
@@ -38,6 +38,178 @@ export function init() {
   $('btnAR').addEventListener('click', activar);
   $('arLeft').addEventListener('click', () => ajustarRumbo(-5));
   $('arRight').addEventListener('click', () => ajustarRumbo(5));
+  cablearCongelado();
+}
+
+// ═══ Modo congelado ═══════════════════════════════════════════════════════════
+//
+// Sostener el móvil apuntando al cielo durante minuto y medio es incómodo, y
+// además el eclipse dura casi dos horas: nadie va a seguirlo así. Este modo
+// captura un fotograma de la cámara —con el encuadre real desde donde estás— y
+// anima encima el Sol y la Luna, con control de tiempo. Así puedes ver cómo
+// avanzará el eclipse sobre TU horizonte, con el móvil en la mano.
+
+let congelado = null;      // { imagen, orientacion, W, H }
+let tCongelado = 0;
+let reproduciendo = false;
+let velocidad = 60;
+let rafCongelado = null;
+
+function cablearCongelado() {
+  $('btnVerEclipse').addEventListener('click', capturarFotograma);
+  $('frozenBack').addEventListener('click', volverACamara);
+
+  $('frozenPlay').addEventListener('click', (e) => {
+    reproduciendo = !reproduciendo;
+    e.currentTarget.textContent = reproduciendo ? '❚❚' : '▶';
+  });
+
+  $('frozenSpeed').addEventListener('click', (e) => {
+    const pasos = [10, 60, 200, 600];
+    velocidad = pasos[(pasos.indexOf(velocidad) + 1) % pasos.length];
+    e.currentTarget.textContent = `${velocidad}×`;
+  });
+
+  $('frozenMax').addEventListener('click', () => {
+    const c = state.circ;
+    if (!c?.visible) return;
+    reproduciendo = false;
+    $('frozenPlay').textContent = '▶';
+    tCongelado = c.max.date.getTime();
+    dibujarCongelado();
+  });
+
+  $('frozenSlider').addEventListener('input', (e) => {
+    const { t0, t1 } = ventanaEclipse();
+    reproduciendo = false;
+    $('frozenPlay').textContent = '▶';
+    tCongelado = t0 + ((t1 - t0) * e.target.value) / 1000;
+    dibujarCongelado();
+  });
+}
+
+/** Ventana temporal que recorre el deslizador: de primer a último contacto. */
+function ventanaEclipse() {
+  const c = state.circ;
+  const t0 = c?.contacts?.c1?.getTime() ?? Date.parse('2026-08-12T19:30:00Z');
+  const t1 = c?.contacts?.c4?.getTime() ?? Date.parse('2026-08-12T21:30:00Z');
+  return { t0, t1 };
+}
+
+function capturarFotograma() {
+  if (!video || !video.videoWidth) {
+    toast('La cámara aún no está lista');
+    return;
+  }
+  const cv = $('arFrozenCanvas');
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+
+  // Se guarda el fotograma recortado igual que se ve en pantalla (object-fit:
+  // cover), para que la superposición siga cuadrando con la imagen.
+  const foto = document.createElement('canvas');
+  foto.width = W; foto.height = H;
+  const fg = foto.getContext('2d');
+  const escala = Math.max(W / video.videoWidth, H / video.videoHeight);
+  const dw = video.videoWidth * escala, dh = video.videoHeight * escala;
+  fg.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+
+  // Se congela también la orientación: la superposición debe quedar clavada
+  // sobre la foto aunque después muevas el móvil.
+  congelado = { imagen: foto, orientacion: orientation ? { ...orientation } : null, W, H };
+
+  const c = state.circ;
+  tCongelado = c?.max?.date?.getTime() ?? ventanaEclipse().t0;
+  reproduciendo = false;
+  $('frozenPlay').textContent = '▶';
+
+  $('arStage').classList.remove('on');
+  $('arFrozen').hidden = false;
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+
+  dibujarCongelado();
+  bucleCongelado();
+  toast('Mueve la barra o dale a reproducir', 3200);
+}
+
+function volverACamara() {
+  reproduciendo = false;
+  if (rafCongelado) cancelAnimationFrame(rafCongelado);
+  $('arFrozen').hidden = true;
+  $('arStage').classList.add('on');
+  running = true;
+  ajustarLienzo();
+  bucle();
+}
+
+let ultimoCongelado = 0;
+
+function bucleCongelado() {
+  if ($('arFrozen').hidden) return;
+  rafCongelado = requestAnimationFrame(bucleCongelado);
+  if (!reproduciendo) { ultimoCongelado = 0; return; }
+
+  const ahora = performance.now();
+  const dt = ultimoCongelado ? Math.min(100, ahora - ultimoCongelado) : 16;
+  ultimoCongelado = ahora;
+
+  const { t0, t1 } = ventanaEclipse();
+  tCongelado += dt * velocidad;
+  if (tCongelado > t1) tCongelado = t0;
+  dibujarCongelado();
+}
+
+function dibujarCongelado() {
+  if (!congelado) return;
+  const cv = $('arFrozenCanvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  g.drawImage(congelado.imagen, 0, 0, W, H);
+
+  const obs = { lat: state.lat, lon: state.lon, elev: state.elev };
+  const momento = new Date(tCongelado);
+  const st = eclipseState(momento, obs);
+  const pxPorGrado = ((W / 2) / Math.tan((hfov / 2) * DEG)) * DEG;
+
+  // Se proyecta con la orientación GUARDADA, no con la actual.
+  const p = proyectar(st.sun.az, st.sun.alt, W, H, congelado.orientacion);
+
+  if (state.horizonProfile) dibujarHorizonteEn(g, W, H, congelado.orientacion);
+
+  if (p.visible) {
+    dibujarSolEn(g, p.x, p.y, st, pxPorGrado);
+  } else {
+    g.fillStyle = 'rgba(8,11,20,.75)';
+    g.fillRect(0, H / 2 - 34, W, 68);
+    g.fillStyle = '#ffd08a';
+    g.font = '600 14px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('El Sol queda fuera de este encuadre', W / 2, H / 2 - 6);
+    g.fillStyle = '#97a2bb'; g.font = '12px system-ui, sans-serif';
+    g.fillText(`Estará al ${cardinal(st.sun.az)}, a ${st.sun.alt.toFixed(1)}° de altura`,
+               W / 2, H / 2 + 16);
+  }
+
+  // Estado numérico
+  $('frozenClock').textContent = fmtTime(momento);
+  const c = state.circ;
+  let fase = `${(st.obscuration * 100).toFixed(1)}% cubierto`;
+  if (st.isTotal) fase = 'TOTALIDAD';
+  else if (st.obscuration <= 0) fase = 'sin eclipse';
+  const h = state.horizonProfile ? horizonAt(state.horizonProfile, st.sun.az) : null;
+  if (h !== null && st.sun.alt < h) fase += ' · tapado por el relieve';
+  else if (st.sun.alt <= 0) fase += ' · bajo el horizonte';
+  $('frozenPhase').textContent = fase;
+
+  const { t0, t1 } = ventanaEclipse();
+  const slider = $('frozenSlider');
+  if (document.activeElement !== slider) {
+    slider.value = String(Math.round(((tCongelado - t0) / (t1 - t0)) * 1000));
+  }
 }
 
 async function activar() {
@@ -168,10 +340,10 @@ function vectorCielo(azDeg, altDeg) {
  * @returns {{x:number, y:number, visible:boolean, angle:number}}
  *   `visible` false si queda a la espalda; `angle` = separación al centro.
  */
-function proyectar(azDeg, altDeg, W, H) {
-  if (!orientation) return { x: W / 2, y: H / 2, visible: false, angle: 180 };
+function proyectar(azDeg, altDeg, W, H, orient = orientation) {
+  if (!orient) return { x: W / 2, y: H / 2, visible: false, angle: 180 };
 
-  const R = matrizRotacion(orientation.alpha + headingOffset, orientation.beta, orientation.gamma);
+  const R = matrizRotacion(orient.alpha + headingOffset, orient.beta, orient.gamma);
 
   // Ejes de la cámara: mira por −Z del dispositivo; la pantalla define derecha
   // (+X) y arriba (+Y).
@@ -244,10 +416,10 @@ function dibujar() {
   const pxPorGrado = (W / 2) / Math.tan((hfov / 2) * DEG) * DEG;
   const p = proyectar(st.sun.az, st.sun.alt, W, H);
 
-  dibujarHorizonte(W, H, pxPorGrado);
+  dibujarHorizonteEn(ctx, W, H);
 
   if (p.visible && p.x > -200 && p.x < W + 200 && p.y > -200 && p.y < H + 200) {
-    dibujarSol(p.x, p.y, st, pxPorGrado);
+    dibujarSolEn(ctx, p.x, p.y, st, pxPorGrado);
   } else {
     dibujarFlecha(W, H, p, st);
   }
@@ -260,29 +432,29 @@ function dibujar() {
  * vistazo el horizonte calculado con el que se ve de verdad — y de paso
  * comprobar si la brújula está bien orientada.
  */
-function dibujarHorizonte(W, H, pxPorGrado) {
+function dibujarHorizonteEn(g, W, H, orient = orientation) {
   const prof = state.horizonProfile;
-  if (!prof || !orientation) return;
+  if (!prof || !orient) return;
 
-  ctx.beginPath();
+  g.beginPath();
   let iniciado = false;
   for (let dx = -40; dx <= 40; dx += 1) {
     const az = (state.circ.max.sun.az + dx + 360) % 360;
     const alt = horizonAt(prof, az);
-    const p = proyectar(az, alt, W, H);
+    const p = proyectar(az, alt, W, H, orient);
     if (!p.visible) { iniciado = false; continue; }
-    if (!iniciado) { ctx.moveTo(p.x, p.y); iniciado = true; }
-    else ctx.lineTo(p.x, p.y);
+    if (!iniciado) { g.moveTo(p.x, p.y); iniciado = true; }
+    else g.lineTo(p.x, p.y);
   }
-  ctx.strokeStyle = 'rgba(110,220,180,.85)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  g.strokeStyle = 'rgba(110,220,180,.85)';
+  g.lineWidth = 2;
+  g.setLineDash([6, 4]);
+  g.stroke();
+  g.setLineDash([]);
 }
 
 /** El Sol con la mordida real de la Luna, orientada como se verá. */
-function dibujarSol(x, y, st, pxPorGrado) {
+function dibujarSolEn(g, x, y, st, pxPorGrado) {
   // El Sol mide medio grado: a escala real serían unos pocos píxeles, invisible.
   // Se dibuja aumentado para que se vea la fase, manteniendo la PROPORCIÓN
   // correcta entre los discos y la dirección del desplazamiento lunar.
@@ -300,7 +472,7 @@ function dibujarSol(x, y, st, pxPorGrado) {
   const total = st.isTotal;
 
   // Halo / corona
-  const halo = ctx.createRadialGradient(x, y, rSol * 0.6, x, y, rSol * (total ? 3.4 : 2.1));
+  const halo = g.createRadialGradient(x, y, rSol * 0.6, x, y, rSol * (total ? 3.4 : 2.1));
   if (total) {
     halo.addColorStop(0, 'rgba(207,227,255,.55)');
     halo.addColorStop(0.5, 'rgba(160,190,255,.22)');
@@ -309,28 +481,28 @@ function dibujarSol(x, y, st, pxPorGrado) {
     halo.addColorStop(0, 'rgba(255,200,90,.5)');
     halo.addColorStop(1, 'rgba(255,160,60,0)');
   }
-  ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(x, y, rSol * (total ? 3.4 : 2.1), 0, Math.PI * 2); ctx.fill();
+  g.fillStyle = halo;
+  g.beginPath(); g.arc(x, y, rSol * (total ? 3.4 : 2.1), 0, Math.PI * 2); g.fill();
 
   // Disco solar
-  ctx.save();
-  ctx.beginPath(); ctx.arc(x, y, rSol, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = total ? '#0a0a12' : '#ffd45e';
-  ctx.fillRect(x - rSol, y - rSol, rSol * 2, rSol * 2);
+  g.save();
+  g.beginPath(); g.arc(x, y, rSol, 0, Math.PI * 2); g.clip();
+  g.fillStyle = total ? '#0a0a12' : '#ffd45e';
+  g.fillRect(x - rSol, y - rSol, rSol * 2, rSol * 2);
   // Disco lunar recortando el solar
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.beginPath(); ctx.arc(mx, my, rLuna, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
+  g.globalCompositeOperation = 'destination-out';
+  g.beginPath(); g.arc(mx, my, rLuna, 0, Math.PI * 2); g.fill();
+  g.restore();
 
   // Borde
-  ctx.beginPath(); ctx.arc(x, y, rSol, 0, Math.PI * 2);
-  ctx.strokeStyle = total ? 'rgba(207,227,255,.9)' : 'rgba(255,220,140,.75)';
-  ctx.lineWidth = 2; ctx.stroke();
+  g.beginPath(); g.arc(x, y, rSol, 0, Math.PI * 2);
+  g.strokeStyle = total ? 'rgba(207,227,255,.9)' : 'rgba(255,220,140,.75)';
+  g.lineWidth = 2; g.stroke();
 
   // Retículo de puntería
-  ctx.beginPath(); ctx.arc(x, y, rSol * 4.2, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 1;
-  ctx.setLineDash([4, 6]); ctx.stroke(); ctx.setLineDash([]);
+  g.beginPath(); g.arc(x, y, rSol * 4.2, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 1;
+  g.setLineDash([4, 6]); g.stroke(); g.setLineDash([]);
 }
 
 /** Flecha hacia el Sol cuando queda fuera de encuadre. */

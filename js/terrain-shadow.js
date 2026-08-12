@@ -60,8 +60,8 @@ export async function computeShadowMask(bbox, opts = {}) {
   // con la resolución, el número de teselas se mantiene casi constante aunque
   // el usuario se aleje muchísimo.
   const metrosPorPixel = (anchoGeo * 111320 * Math.cos(latCentro * DEG)) / W;
-  let demZoom = Math.round(Math.log2((156543 * Math.cos(latCentro * DEG)) / metrosPorPixel));
-  demZoom = Math.max(7, Math.min(12, demZoom));
+  let demZoom = Math.round(Math.log2((156543 * Math.cos(latCentro * DEG)) / metrosPorPixel)) + 1;
+  demZoom = Math.max(6, Math.min(12, demZoom));
 
   const cobertura = await ensureTilesForBBox(bbox, demZoom, onProgress);
 
@@ -95,14 +95,34 @@ export async function computeShadowMask(bbox, opts = {}) {
   for (let py = 0; py < H; py++) {
     lats[py] = invMercY(yTop - (altoMerc * (py + 0.5)) / H);
   }
+  // Cuando el raster es más grueso que el modelo de elevación (vista de toda la
+  // Península), tomar un solo punto por píxel se salta las cimas: caerías en
+  // muestras de valle y saldría iluminado lo que en realidad proyecta sombra.
+  // Se toma el MÁXIMO de una submuestra dentro del píxel, que es lo correcto
+  // para sombras: manda quien tapa, no el promedio.
+  const demMpp = (156543 * Math.cos(latCentro * DEG)) / 2 ** demZoom;
+  const submuestra = Math.max(1, Math.min(4, Math.round(metrosPorPixel / demMpp)));
+  const dLon = anchoGeo / W;
+  const dLat = (lats[0] - lats[H - 1]) / Math.max(1, H - 1);
+
   let sinDatos = 0;
   for (let py = 0; py < H; py++) {
     const lat = lats[py];
     for (let px = 0; px < W; px++) {
       const lon = west + (anchoGeo * (px + 0.5)) / W;
-      const h = elevationAtSync(lat, lon, demZoom);
-      if (h === null) { sinDatos++; elev[py * W + px] = 0; }
-      else elev[py * W + px] = h;
+      let mejor = null;
+      for (let sy = 0; sy < submuestra; sy++) {
+        for (let sx = 0; sx < submuestra; sx++) {
+          const oLon = lon + dLon * ((sx + 0.5) / submuestra - 0.5);
+          const oLat = lat + dLat * ((sy + 0.5) / submuestra - 0.5);
+          // Recortado a 0: el MDT trae batimetría y el mar no proyecta sombra.
+          const bruto = elevationAtSync(oLat, oLon, demZoom);
+          const h = bruto === null ? null : Math.max(0, bruto);
+          if (h !== null && (mejor === null || h > mejor)) mejor = h;
+        }
+      }
+      if (mejor === null) { sinDatos++; elev[py * W + px] = 0; }
+      else elev[py * W + px] = mejor;
     }
   }
   onProgress?.(0.75);

@@ -24,7 +24,7 @@ const R_EARTH_KM = 6378.137;
 const SUN_VIEW_DIST = 600;   // distancia comprimida del Sol, en radios terrestres
 
 let renderer, scene, camera, raf = null;
-let earth, moon, sunMesh, sunLight, umbraCone, penumbraCone, shadowSpot, marcadorUsuario;
+let earth, moon, sunMesh, sunLight, umbraCone, penumbraCone, shadowSpot, sombraAnillo, marcadorUsuario;
 let pathLine, moonOrbitLine;
 let corriendo = false, reproduciendo = false, velocidad = 60;
 let tActual = Date.parse(`${CONFIG.eclipseDate}T18:28:00Z`);
@@ -261,7 +261,7 @@ function crearSombra() {
   penumbraCone = new THREE.Mesh(
     new THREE.ConeGeometry(1, 1, 40, 1, true),
     new THREE.MeshBasicMaterial({
-      color: 0x2a2f45, transparent: true, opacity: 0.09,
+      color: 0x6f7fb0, transparent: true, opacity: 0.07,
       side: THREE.DoubleSide, depthWrite: false,
     }),
   );
@@ -271,19 +271,34 @@ function crearSombra() {
   // por eso la totalidad solo se ve en una franja estrecha.
   umbraCone = new THREE.Mesh(
     new THREE.ConeGeometry(1, 1, 32, 1, true),
+    // Un cono negro sobre fondo negro era invisible. Se pinta en tono cálido
+    // translúcido: no es el color de una sombra, pero es lo que la hace legible
+    // contra el espacio, que es de lo que se trata.
     new THREE.MeshBasicMaterial({
-      color: 0x000000, transparent: true, opacity: 0.55,
+      color: 0xffb238, transparent: true, opacity: 0.28,
       side: THREE.DoubleSide, depthWrite: false,
+      blending: THREE.AdditiveBlending,
     }),
   );
   scene.add(umbraCone);
 
   // Mancha de la umbra sobre la superficie.
   shadowSpot = new THREE.Mesh(
-    new THREE.CircleGeometry(0.025, 32),
-    new THREE.MeshBasicMaterial({ color: 0x120a20, transparent: true, opacity: 0.9 }),
+    new THREE.CircleGeometry(0.025, 48),
+    new THREE.MeshBasicMaterial({ color: 0x0a0714, transparent: true, opacity: 0.92 }),
   );
   scene.add(shadowSpot);
+
+  // La umbra real es diminuta: a escala del globo mide unos pocos píxeles, y
+  // encima es oscura sobre un planeta oscurecido. Un anillo de contraste la
+  // hace localizable sin falsear su tamaño, que sigue siendo el verdadero.
+  sombraAnillo = new THREE.Mesh(
+    new THREE.RingGeometry(0.025, 0.034, 48),
+    new THREE.MeshBasicMaterial({
+      color: 0xffb238, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+    }),
+  );
+  scene.add(sombraAnillo);
 
   marcadorUsuario = new THREE.Mesh(
     new THREE.SphereGeometry(0.012, 12, 10),
@@ -359,8 +374,13 @@ function aplicarEscalaCuerpos() {
   const k = enSistema ? AUMENTO_SISTEMA : 1;
   earth.scale.setScalar(k);
   moon.scale.setScalar(k);
-  pathLine.visible = !enSistema;
+  // El recorrido se dibuja también en la vista de sistema: como el haz apunta
+  // al punto de impacto REAL escalado igual que la Tierra, ambos coinciden y se
+  // ve el haz aterrizando justo sobre la línea. Es lo que hace entendible el
+  // dibujo. (Antes no coincidían porque el cono usaba geometría sin escalar.)
+  pathLine.visible = true;
   shadowSpot.visible = !enSistema;
+  sombraAnillo.visible = !enSistema;
   marcadorUsuario.visible = !enSistema;
   moonOrbitLine.visible = enSistema;
 }
@@ -371,53 +391,61 @@ function aplicarEscalaCuerpos() {
  * Sol → Luna prolongada.
  */
 function colocarConos(vSol, vLuna) {
-  const eje = vLuna.clone().sub(vSol).normalize();
-  const R_LUNA = 0.2725;
-  const R_SOL_RT = 696000 / R_EARTH_KM;
-  const distSolLuna = vLuna.clone().sub(vSol).length();
-
-  // Vértice del cono de umbra, medido desde la Luna.
-  const largoUmbra = (R_LUNA * distSolLuna) / (R_SOL_RT - R_LUNA);
-
-  orientarCono(umbraCone, vLuna, eje, R_LUNA, largoUmbra);
-  // La penumbra se abre; se dibuja un tramo suficiente para llegar a la Tierra.
-  const largoPenumbra = vLuna.length() + 1.5;
-  orientarCono(penumbraCone, vLuna, eje, R_LUNA, largoPenumbra, true);
-
-  // Los conos solo se muestran en la vista de sistema. En las vistas cercanas
-  // la cámara queda DENTRO de ellos y su superficie translúcida cruzaba la
-  // pantalla como bandas difusas.
-  // Esto va DESPUÉS de orientarCono a propósito: esa función también toca
-  // `visible`, y si se pusiera antes lo sobrescribiría en cada fotograma.
   const enSistema = modoVista === 'sistema';
-  umbraCone.visible = umbraCone.visible && enSistema;
-  penumbraCone.visible = penumbraCone.visible && enSistema;
-}
+  if (!enSistema) {
+    umbraCone.visible = false;
+    penumbraCone.visible = false;
+    return;
+  }
 
-function orientarCono(mesh, apice, eje, radioBase, largo, invertido = false) {
-  // ConeGeometry nace centrado en el origen, con el eje en +Y y la punta arriba.
-  mesh.geometry.dispose();
-  mesh.geometry = invertido
-    ? new THREE.ConeGeometry(radioBase * 2.6, largo, 40, 1, true)
-    : new THREE.ConeGeometry(radioBase, largo, 32, 1, true);
+  // En esta vista los cuerpos van aumentados 20 veces pero sus POSICIONES son
+  // las reales, así que un cono con la geometría exacta entraría en la Tierra
+  // agrandada mucho antes de donde toca y no coincidiría con el recorrido
+  // dibujado. Se traza en su lugar un haz desde la Luna hasta el punto REAL de
+  // impacto, escalado igual que los cuerpos: el sitio donde cae la sombra —que
+  // es lo que cuenta— queda correcto, y la forma es esquemática.
+  const p = shadowAxisPoint(new Date(tActual));
+  if (!p) { umbraCone.visible = false; penumbraCone.visible = false; return; }
 
-  // El cono debe ir del ápice (posición de la Luna) hacia `eje`.
-  const centro = apice.clone().add(eje.clone().multiplyScalar(largo / 2));
-  mesh.position.copy(centro);
-  // Punta hacia −eje para que la base quede en la Luna.
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), eje);
-  mesh.visible = largo > 0 && isFinite(largo);
+  const impacto = vectorSuperficie(p.lat, p.lon, 1)
+    .applyAxisAngle(new THREE.Vector3(0, 1, 0), p.gst * DEG)
+    .multiplyScalar(AUMENTO_SISTEMA);
+
+  const eje = impacto.clone().sub(vLuna);
+  const largo = eje.length();
+  eje.normalize();
+
+  const radioLuna = 0.2725 * AUMENTO_SISTEMA;
+  const radioSuelo = Math.max(0.05, (p.umbraRadiusKm / R_EARTH_KM) * AUMENTO_SISTEMA);
+
+  umbraCone.geometry.dispose();
+  umbraCone.geometry = new THREE.CylinderGeometry(radioSuelo, radioLuna, largo, 28, 1, true);
+  umbraCone.position.copy(vLuna.clone().add(eje.clone().multiplyScalar(largo / 2)));
+  umbraCone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), eje);
+  umbraCone.visible = true;
+
+  // El haz de penumbra se abre; solo se insinúa para dar contexto.
+  penumbraCone.geometry.dispose();
+  penumbraCone.geometry = new THREE.CylinderGeometry(
+    radioSuelo * 9, radioLuna * 1.6, largo, 32, 1, true,
+  );
+  penumbraCone.position.copy(umbraCone.position);
+  penumbraCone.quaternion.copy(umbraCone.quaternion);
+  penumbraCone.visible = true;
 }
 
 function colocarMancha(fecha) {
   const p = shadowAxisPoint(fecha);
   // En la vista de sistema los cuerpos van aumentados y la mancha quedaría
-  // enterrada dentro de la esfera: allí el cono de umbra ya señala el punto.
-  if (!p || modoVista === 'sistema') { shadowSpot.visible = false; return; }
+  // enterrada dentro de la esfera: allí el cono ya señala el punto.
+  if (!p || modoVista === 'sistema') {
+    shadowSpot.visible = false;
+    sombraAnillo.visible = false;
+    return;
+  }
   shadowSpot.visible = true;
+  sombraAnillo.visible = true;
 
-  // La mancha se sitúa en el marco INERCIAL, no en el fijo a la Tierra: su
-  // posición ya viene calculada con el tiempo sidéreo dentro.
   const gstRad = p.gst * DEG;
   const local = vectorSuperficie(p.lat, p.lon, 1.002);
   local.applyAxisAngle(new THREE.Vector3(0, 1, 0), gstRad);
@@ -426,8 +454,37 @@ function colocarMancha(fecha) {
   shadowSpot.lookAt(0, 0, 0);
   shadowSpot.rotateX(Math.PI);
 
-  const radio = Math.max(0.012, (p.widthKm / 2) / R_EARTH_KM);
-  shadowSpot.scale.setScalar(radio / 0.025);
+  // La umbra NO es un círculo sobre el suelo: es la sección circular del cono
+  // proyectada en oblicuo, o sea una elipse. Con el Sol a 7° se estira ocho
+  // veces hacia el ocaso, y esa forma alargada es justo lo que hace que la
+  // franja de totalidad sea estrecha pero la mancha enorme.
+  const semiMenor = p.umbraRadiusKm / R_EARTH_KM;
+  const sinAlt = Math.max(0.03, Math.sin(p.sunAlt * DEG));
+  const semiMayor = semiMenor / sinAlt;
+
+  // Se escala el disco unidad a los dos semiejes y se gira para alinear el eje
+  // mayor con el acimut del Sol sobre el terreno.
+  shadowSpot.scale.set(semiMayor / 0.025, semiMenor / 0.025, 1);
+
+  // Orientación del eje mayor: hacia el acimut solar, medido en el plano
+  // tangente del punto de impacto.
+  const norte = new THREE.Vector3(0, 1, 0)
+    .projectOnPlane(local.clone().normalize()).normalize();
+  const este = new THREE.Vector3().crossVectors(norte, local.clone().normalize()).normalize();
+  const dirSol = norte.clone().multiplyScalar(Math.cos(p.sunAz * DEG))
+    .addScaledVector(este, Math.sin(p.sunAz * DEG)).normalize();
+
+  // Ángulo entre el eje X local del disco y la dirección del Sol.
+  const ejeX = new THREE.Vector3(1, 0, 0).applyQuaternion(shadowSpot.quaternion);
+  const ejeY = new THREE.Vector3(0, 1, 0).applyQuaternion(shadowSpot.quaternion);
+  const ang = Math.atan2(dirSol.dot(ejeY), dirSol.dot(ejeX));
+  shadowSpot.rotateZ(ang);
+
+  // El anillo acompaña a la elipse: misma posición, orientación y forma, un
+  // pelo por encima de la superficie para que no se entierre en ella.
+  sombraAnillo.position.copy(local).multiplyScalar(1.0015);
+  sombraAnillo.quaternion.copy(shadowSpot.quaternion);
+  sombraAnillo.scale.copy(shadowSpot.scale);
 }
 
 function colocarUsuario(gst) {
@@ -473,9 +530,11 @@ function actualizarPanel(fecha) {
 // FOV horizontal es menos de la mitad del vertical y una distancia fija dejaba
 // el globo desbordado por los lados.
 const VISTAS = {
-  tierra:  { etiqueta: 'Tierra',  encaja: 1.25, desdeSol: 32 },
-  sistema: { etiqueta: 'Sistema', encaja: 72,   desdeSol: 72 },
-  sombra:  { etiqueta: 'Sombra',  encaja: 0.42, desdeSol: null },
+  // `centrarEnSombra` apunta la cámara al punto donde cae la umbra, no a la
+  // dirección del Sol: así el eclipse sale centrado y no en un borde del globo.
+  tierra:  { etiqueta: 'Tierra',  encaja: 1.3,  centrarEnSombra: true,  altura: 0 },
+  sistema: { etiqueta: 'Sistema', encaja: 72,   centrarEnSombra: false, altura: 0 },
+  sombra:  { etiqueta: 'Sombra',  encaja: 0.42, centrarEnSombra: true,  altura: 0 },
 };
 
 // Aumento de los CUERPOS en la vista de sistema. La Luna está a 60 radios
@@ -486,7 +545,8 @@ const AUMENTO_SISTEMA = 20;
 
 const ORDEN_VISTAS = ['tierra', 'sistema', 'sombra'];
 
-let camGiro = 0.35;   // giro del usuario alrededor del eje Sol-Tierra
+let camGiro = 0.35;          // giro alrededor del eje Sol-Tierra
+let camInclinacion = 32;     // ángulo entre la cámara y la dirección del Sol
 let zoomManual = 1;   // factor que el usuario ajusta con pellizco o arrastre
 const camTarget = new THREE.Vector3();
 
@@ -501,14 +561,11 @@ function colocarCamara() {
   const vista = VISTAS[modoVista];
   const camDist = distanciaParaEncajar(vista.encaja);
 
-  if (modoVista === 'sombra') {
-    // Cenital sobre la mancha de sombra: se ve avanzar por la superficie.
-    const p = shadowAxisPoint(new Date(tActual));
-    if (p) {
-      const v = vectorSuperficie(p.lat, p.lon, 1);
-      v.applyAxisAngle(new THREE.Vector3(0, 1, 0), p.gst * DEG);
-      camTarget.copy(v.clone().multiplyScalar(0.6));
-      camera.position.copy(v.clone().multiplyScalar(1 + camDist));
+  if (vista.centrarEnSombra) {
+    const dir = direccionSombra();
+    if (dir) {
+      camTarget.copy(modoVista === 'sombra' ? dir.clone().multiplyScalar(0.6) : new THREE.Vector3());
+      camera.position.copy(dir.clone().multiplyScalar(modoVista === 'sombra' ? 1 + camDist : camDist));
       camera.up.set(0, 1, 0);
       camera.lookAt(camTarget);
       return;
@@ -523,7 +580,7 @@ function colocarCamara() {
   const derecha = new THREE.Vector3().crossVectors(ref, haciaSol).normalize();
   const arriba = new THREE.Vector3().crossVectors(haciaSol, derecha).normalize();
 
-  const a = (vista.desdeSol ?? 32) * DEG;
+  const a = camInclinacion * DEG;
   const dir = haciaSol.clone().multiplyScalar(Math.cos(a))
     .addScaledVector(derecha, Math.sin(a) * Math.cos(camGiro))
     .addScaledVector(arriba, Math.sin(a) * Math.sin(camGiro))
@@ -535,55 +592,98 @@ function colocarCamara() {
   camera.lookAt(camTarget);
 }
 
+/**
+ * Dirección desde el centro de la Tierra hacia la umbra, girada por el usuario.
+ *
+ * Si en ese instante la sombra no toca la Tierra (antes de entrar o después de
+ * salir) se usa el punto válido más cercano en el tiempo. Sin eso, la cámara
+ * saltaba bruscamente a otro encuadre cada vez que la umbra se despegaba, que
+ * es el "zoom raro" que aparecía al principio y al final del recorrido.
+ */
+function direccionSombra() {
+  const p = shadowAxisPoint(new Date(tActual)) ?? sombraMasCercana(tActual);
+  if (!p) return null;
+  const v = vectorSuperficie(p.lat, p.lon, 1);
+  v.applyAxisAngle(new THREE.Vector3(0, 1, 0), p.gst * DEG);
+  // El giro del usuario se aplica alrededor del eje polar, para poder rodear el
+  // globo sin perder de vista la zona del eclipse.
+  v.applyAxisAngle(new THREE.Vector3(0, 1, 0), camGiro * 0.6);
+  return v.normalize();
+}
+
+let cacheSombraCercana = { t: null, p: null };
+
+function sombraMasCercana(t) {
+  if (cacheSombraCercana.t === t) return cacheSombraCercana.p;
+  let p = null;
+  for (let salto = 60000; salto <= 90 * 60000 && !p; salto += 60000) {
+    p = shadowAxisPoint(new Date(t - salto)) ?? shadowAxisPoint(new Date(t + salto));
+  }
+  cacheSombraCercana = { t, p };
+  return p;
+}
+
 function controlesCamara(dom) {
-  let arrastrando = false, lx = 0, ly = 0, pinchIni = 0, distIni = 0;
+  // Regla: UN dedo gira, DOS dedos hacen zoom. Antes el arrastre vertical
+  // también acercaba, así que cualquier gesto diagonal giraba y hacía zoom a la
+  // vez y resultaba imposible controlar nada.
+  let arrastrando = false, lx = 0, ly = 0;
+  let pinchIni = 0, zoomIni = 1, dedos = 0;
 
   const abajo = (x, y) => { arrastrando = true; lx = x; ly = y; };
   const mover = (x, y) => {
-    if (!arrastrando || modoVista === 'sombra') return;
+    if (!arrastrando || dedos > 1) return;
     camGiro += (x - lx) * 0.008;
-    // El arrastre vertical acerca y aleja: con la cámara anclada al Sol, subir
-    // y bajar la órbita no aporta (siempre queremos la cara iluminada de frente).
-    zoomManual = Math.max(0.35, Math.min(6, zoomManual * (1 + (y - ly) * 0.004)));
+    // Vertical: acerca o aleja el punto de vista respecto a la dirección del
+    // Sol, de vista frontal a vista lateral. Siempre queda algo iluminado.
+    camInclinacion = Math.max(6, Math.min(140, camInclinacion + (y - ly) * 0.25));
     lx = x; ly = y;
     colocarCamara();
   };
   const arriba = () => { arrastrando = false; };
 
-  dom.addEventListener('mousedown', (e) => abajo(e.clientX, e.clientY));
+  dom.addEventListener('mousedown', (e) => { dedos = 1; abajo(e.clientX, e.clientY); });
   window.addEventListener('mousemove', (e) => mover(e.clientX, e.clientY));
   window.addEventListener('mouseup', arriba);
 
+  const dist2 = (t) => Math.hypot(
+    t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY,
+  );
+
   dom.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 1) abajo(e.touches[0].clientX, e.touches[0].clientY);
-    else if (e.touches.length === 2) {
-      pinchIni = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY,
-      );
-      distIni = zoomManual;
-    }
+    dedos = e.touches.length;
+    if (dedos === 1) abajo(e.touches[0].clientX, e.touches[0].clientY);
+    else if (dedos === 2) { arrastrando = false; pinchIni = dist2(e.touches); zoomIni = zoomManual; }
   }, { passive: true });
 
   dom.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 1) mover(e.touches[0].clientX, e.touches[0].clientY);
-    else if (e.touches.length === 2 && pinchIni) {
-      const d = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY,
-      );
-      zoomManual = Math.max(0.35, Math.min(6, distIni * (pinchIni / d)));
+    // preventDefault mantiene el gesto dentro de la escena: sin esto el
+    // navegador se lleva el arrastre como scroll de la página.
+    if (e.cancelable) e.preventDefault();
+    dedos = e.touches.length;
+    if (dedos === 1) mover(e.touches[0].clientX, e.touches[0].clientY);
+    else if (dedos === 2 && pinchIni) {
+      zoomManual = limitarZoom(zoomIni * (pinchIni / dist2(e.touches)));
       colocarCamara();
     }
-  }, { passive: true });
+  }, { passive: false });
 
-  dom.addEventListener('touchend', arriba);
+  const finTouch = (e) => {
+    dedos = e.touches.length;
+    if (dedos === 0) { arrastrando = false; pinchIni = 0; }
+    else if (dedos === 1) abajo(e.touches[0].clientX, e.touches[0].clientY);
+  };
+  dom.addEventListener('touchend', finTouch);
+  dom.addEventListener('touchcancel', finTouch);
+
   dom.addEventListener('wheel', (e) => {
     e.preventDefault();
-    zoomManual = Math.max(0.35, Math.min(6, zoomManual * (1 + Math.sign(e.deltaY) * 0.12)));
+    zoomManual = limitarZoom(zoomManual * (1 + Math.sign(e.deltaY) * 0.12));
     colocarCamara();
   }, { passive: false });
 }
+
+const limitarZoom = (z) => Math.max(0.3, Math.min(6, z));
 
 // ── Controles de la interfaz ─────────────────────────────────────────────────
 
@@ -617,6 +717,13 @@ function cablearControles() {
     // la reproducción parada nada más volvería a evaluarlos.
     actualizar(tActual);
     colocarCamara();
+  });
+
+  $('orbitZoomIn').addEventListener('click', () => {
+    zoomManual = limitarZoom(zoomManual * 0.8); colocarCamara();
+  });
+  $('orbitZoomOut').addEventListener('click', () => {
+    zoomManual = limitarZoom(zoomManual * 1.25); colocarCamara();
   });
 
   $('orbitReal').addEventListener('click', () => {

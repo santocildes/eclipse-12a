@@ -164,6 +164,12 @@ if (!fallos) console.log('  Todos los archivos referenciados existen');
 // ── Comprobación de los ids usados por el JS contra el HTML ─────────────────
 console.log('\nComprobando ids del DOM:');
 const idsHtml = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+// Los módulos también inyectan HTML: hay que contar los id que crean ellos, o
+// se marcarían como inexistentes elementos que sí aparecen en tiempo de
+// ejecución. Se buscan tanto id="x" como id="${...}x" dentro de plantillas.
+for (const mod of modulos.values()) {
+  for (const m of mod.src.matchAll(/\bid="([A-Za-z][\w-]*)"/g)) idsHtml.add(m[1]);
+}
 const idsUsados = new Map();
 for (const [archivo, mod] of modulos) {
   for (const m of mod.src.matchAll(/(?:getElementById\(|\$\()'([^']+)'\)/g)) {

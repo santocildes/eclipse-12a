@@ -33,7 +33,10 @@ export const fmtTimeShort = (d) => (d ? timeShortFmt.format(d) : '—');
 
 export function fmtDuration(seconds) {
   if (!seconds || seconds <= 0) return '—';
-  const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
+  // Se redondea a segundos ENTEROS antes de repartir en minutos: redondear el
+  // resto por separado producía «1 min 60 s» cuando los segundos caían en 59,6.
+  const total = Math.round(seconds);
+  const m = Math.floor(total / 60), s = total % 60;
   return m > 0 ? `${m} min ${String(s).padStart(2, '0')} s` : `${s} s`;
 }
 
